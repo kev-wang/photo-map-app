@@ -131,11 +131,14 @@ function App() {
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
 
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setUserLocation([position.coords.latitude, position.coords.longitude]);
+        const newLocation: [number, number] = [position.coords.latitude, position.coords.longitude];
+        console.log('Setting user location:', newLocation);
+        setUserLocation(newLocation);
       },
       (error) => {
         console.error('Error getting location:', error);
@@ -167,39 +170,73 @@ function App() {
   };
 
   const capturePhoto = () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current) {
+      console.error('Video reference not found');
+      return;
+    }
 
     const canvas = document.createElement('canvas');
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
     const context = canvas.getContext('2d');
-    if (!context) return;
+    if (!context) {
+      console.error('Could not get canvas context');
+      return;
+    }
 
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     const photoUrl = canvas.toDataURL('image/jpeg');
+    console.log('Photo captured, getting location...');
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
+        const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
+        console.log('Got position for new marker:', newPosition);
+        
         const newMarker: PhotoMarker = {
           id: Date.now().toString(),
-          position: [position.coords.latitude, position.coords.longitude],
+          position: newPosition,
           photoUrl,
         };
-        setMarkers(prev => [...prev, newMarker]);
+        
+        setMarkers(prev => {
+          const updatedMarkers = [...prev, newMarker];
+          console.log('Updated markers:', updatedMarkers);
+          return updatedMarkers;
+        });
+
+        // Close camera first
         stopCamera();
+
+        // Pan to the new marker location
+        if (mapRef.current) {
+          setTimeout(() => {
+            mapRef.current?.flyTo(newPosition, 15);
+          }, 500);
+        }
       },
       (error) => {
         console.error('Error getting location:', error);
         stopCamera();
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
       }
     );
   };
 
-  const mapProps: MapContainerProps = {
+  const mapProps: MapContainerProps & { ref?: (map: L.Map) => void } = {
     center: userLocation,
     zoom: 13,
     style: { height: '100%', width: '100%' },
-    scrollWheelZoom: true
+    scrollWheelZoom: true,
+    ref: (map: L.Map | null) => {
+      if (map) {
+        mapRef.current = map;
+      }
+    }
   };
 
   const tileProps: TileLayerProps = {
@@ -213,8 +250,11 @@ function App() {
         <MapContainer {...mapProps}>
           <TileLayer {...tileProps} />
           {markers.map((marker) => (
-            <Marker key={marker.id} position={marker.position}>
-              <StyledPopup>
+            <Marker 
+              key={marker.id} 
+              position={marker.position}
+            >
+              <StyledPopup autoOpen>
                 <img 
                   src={marker.photoUrl} 
                   alt="Captured photo" 
