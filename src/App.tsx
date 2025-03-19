@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import type { MapContainerProps, TileLayerProps } from 'react-leaflet';
 import styled from '@emotion/styled';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -111,19 +112,23 @@ function App() {
     }
   };
 
+  const mapProps: MapContainerProps = {
+    center: userLocation,
+    zoom: 13,
+    style: { height: '100%', width: '100%' },
+    scrollWheelZoom: true
+  };
+
+  const tileProps: TileLayerProps = {
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  };
+
   return (
     <AppContainer>
       <MapWrapper>
-        <MapContainer
-          center={userLocation}
-          zoom={13}
-          style={{ height: '100%', width: '100%' }}
-          scrollWheelZoom={true}
-        >
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          />
+        <MapContainer {...mapProps}>
+          <TileLayer {...tileProps} />
           {markers.map((marker) => (
             <Marker key={marker.id} position={marker.position}>
               <Popup>
