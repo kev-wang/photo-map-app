@@ -17,7 +17,10 @@ interface PhotoMarker {
   id: string;
   position: [number, number];
   photoUrl: string;
+  timestamp: number;
 }
+
+const STORAGE_KEY = 'photo-map-markers';
 
 const AppContainer = styled.div`
   height: 100vh;
@@ -52,6 +55,22 @@ const AddButton = styled.button`
   &:active {
     transform: translateX(-50%) scale(0.95);
   }
+`;
+
+const Notification = styled.div<{ isVisible: boolean }>`
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #4CAF50;
+  color: white;
+  padding: 12px 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1500;
+  opacity: ${props => props.isVisible ? 1 : 0};
+  transition: opacity 0.3s ease;
+  pointer-events: none;
 `;
 
 const CameraOverlay = styled.div<{ isVisible: boolean }>`
@@ -129,9 +148,33 @@ function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([35.6762, 139.6503]);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [notification, setNotification] = useState('');
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const notificationTimeout = useRef<number>();
+
+  // Load markers from local storage
+  useEffect(() => {
+    const savedMarkers = localStorage.getItem(STORAGE_KEY);
+    if (savedMarkers) {
+      try {
+        const parsed = JSON.parse(savedMarkers);
+        console.log('Loaded markers from storage:', parsed);
+        setMarkers(parsed);
+      } catch (error) {
+        console.error('Error loading markers:', error);
+      }
+    }
+  }, []);
+
+  // Save markers to local storage whenever they change
+  useEffect(() => {
+    if (markers.length > 0) {
+      console.log('Saving markers to storage:', markers);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(markers));
+    }
+  }, [markers]);
 
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
@@ -145,6 +188,16 @@ function App() {
       }
     );
   }, []);
+
+  const showNotification = (message: string) => {
+    setNotification(message);
+    if (notificationTimeout.current) {
+      window.clearTimeout(notificationTimeout.current);
+    }
+    notificationTimeout.current = window.setTimeout(() => {
+      setNotification('');
+    }, 3000);
+  };
 
   const startCamera = async () => {
     try {
@@ -197,6 +250,7 @@ function App() {
           id: Date.now().toString(),
           position: newPosition,
           photoUrl,
+          timestamp: Date.now()
         };
         
         setMarkers(prev => {
@@ -204,6 +258,8 @@ function App() {
           console.log('Updated markers:', updatedMarkers);
           return updatedMarkers;
         });
+
+        showNotification('Photo added to map! 📍');
 
         // Close camera first
         stopCamera();
@@ -217,6 +273,7 @@ function App() {
       },
       (error) => {
         console.error('Error getting location:', error);
+        showNotification('Error getting location 😕');
         stopCamera();
       },
       {
@@ -246,23 +303,32 @@ function App() {
 
   return (
     <AppContainer>
+      <Notification isVisible={!!notification}>
+        {notification}
+      </Notification>
       <MapWrapper>
         <MapContainer {...mapProps}>
           <TileLayer {...tileProps} />
-          {markers.map((marker) => (
-            <Marker 
-              key={marker.id} 
-              position={marker.position}
-            >
-              <StyledPopup autoOpen>
-                <img 
-                  src={marker.photoUrl} 
-                  alt="Captured photo" 
-                  style={{ width: '100%', height: 'auto', display: 'block' }}
-                />
-              </StyledPopup>
-            </Marker>
-          ))}
+          {markers.map((marker) => {
+            console.log('Rendering marker:', marker);
+            return (
+              <Marker 
+                key={marker.id} 
+                position={marker.position}
+              >
+                <StyledPopup>
+                  <img 
+                    src={marker.photoUrl} 
+                    alt="Captured photo" 
+                    style={{ width: '100%', height: 'auto', display: 'block' }}
+                  />
+                  <div style={{ padding: '8px', fontSize: '12px', color: '#666' }}>
+                    {new Date(marker.timestamp).toLocaleString()}
+                  </div>
+                </StyledPopup>
+              </Marker>
+            );
+          })}
         </MapContainer>
       </MapWrapper>
       <AddButton onClick={startCamera}>+</AddButton>
