@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import type { MapContainerProps, TileLayerProps } from 'react-leaflet';
 import styled from '@emotion/styled';
@@ -32,7 +32,7 @@ const MapWrapper = styled.div`
 
 const AddButton = styled.button`
   position: absolute;
-  bottom: 20px;
+  bottom: 100px;
   left: 50%;
   transform: translateX(-50%);
   width: 60px;
@@ -54,9 +54,83 @@ const AddButton = styled.button`
   }
 `;
 
+const CameraOverlay = styled.div<{ isVisible: boolean }>`
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: black;
+  z-index: 2000;
+  display: ${props => props.isVisible ? 'flex' : 'none'};
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+`;
+
+const CameraPreview = styled.video`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const CameraControls = styled.div`
+  position: absolute;
+  bottom: 40px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+`;
+
+const CameraButton = styled.button`
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+
+  &:active {
+    transform: scale(0.95);
+  }
+`;
+
+const StyledPopup = styled(Popup)`
+  .leaflet-popup-content-wrapper {
+    padding: 0;
+    overflow: hidden;
+    border-radius: 8px;
+  }
+
+  .leaflet-popup-content {
+    margin: 0;
+    width: 220px !important;
+  }
+
+  .leaflet-popup-close-button {
+    width: 30px !important;
+    height: 30px !important;
+    font-size: 20px !important;
+    padding: 4px !important;
+    color: white !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    z-index: 1;
+  }
+`;
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([35.6762, 139.6503]);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
@@ -69,47 +143,56 @@ function App() {
     );
   }, []);
 
-  const handleAddPhoto = async () => {
+  const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.play();
-
-      // Create a canvas element to capture the photo
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-
-      // Wait for video to be ready
-      video.addEventListener('loadeddata', () => {
-        const context = canvas.getContext('2d')!;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        // Convert canvas to data URL
-        const photoUrl = canvas.toDataURL('image/jpeg');
-        
-        // Stop the camera stream
-        stream.getTracks().forEach(track => track.stop());
-
-        // Get current location and add new marker
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const newMarker: PhotoMarker = {
-              id: Date.now().toString(),
-              position: [position.coords.latitude, position.coords.longitude],
-              photoUrl,
-            };
-            setMarkers(prev => [...prev, newMarker]);
-          },
-          (error) => {
-            console.error('Error getting location:', error);
-          }
-        );
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' }
       });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
+      }
+      setIsCameraOpen(true);
     } catch (error) {
       console.error('Error accessing camera:', error);
     }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraOpen(false);
+  };
+
+  const capturePhoto = () => {
+    if (!videoRef.current) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+
+    context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    const photoUrl = canvas.toDataURL('image/jpeg');
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const newMarker: PhotoMarker = {
+          id: Date.now().toString(),
+          position: [position.coords.latitude, position.coords.longitude],
+          photoUrl,
+        };
+        setMarkers(prev => [...prev, newMarker]);
+        stopCamera();
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        stopCamera();
+      }
+    );
   };
 
   const mapProps: MapContainerProps = {
@@ -131,18 +214,30 @@ function App() {
           <TileLayer {...tileProps} />
           {markers.map((marker) => (
             <Marker key={marker.id} position={marker.position}>
-              <Popup>
+              <StyledPopup>
                 <img 
                   src={marker.photoUrl} 
                   alt="Captured photo" 
-                  style={{ width: '200px', height: 'auto' }}
+                  style={{ width: '100%', height: 'auto', display: 'block' }}
                 />
-              </Popup>
+              </StyledPopup>
             </Marker>
           ))}
         </MapContainer>
       </MapWrapper>
-      <AddButton onClick={handleAddPhoto}>+</AddButton>
+      <AddButton onClick={startCamera}>+</AddButton>
+      <CameraOverlay isVisible={isCameraOpen}>
+        <CameraPreview 
+          ref={videoRef} 
+          autoPlay 
+          playsInline 
+          muted
+        />
+        <CameraControls>
+          <CameraButton onClick={stopCamera}>✕</CameraButton>
+          <CameraButton onClick={capturePhoto}>📸</CameraButton>
+        </CameraControls>
+      </CameraOverlay>
     </AppContainer>
   );
 }
