@@ -152,7 +152,7 @@ function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const notificationTimeout = useRef<number>();
+  const notificationTimeout = useRef<number | undefined>(undefined);
 
   // Load markers from local storage
   useEffect(() => {
