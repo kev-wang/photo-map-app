@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import styled from '@emotion/styled';
 import 'leaflet/dist/leaflet.css';
@@ -118,6 +118,7 @@ function App() {
           center={userLocation}
           zoom={13}
           style={{ height: '100%', width: '100%' }}
+          scrollWheelZoom={true}
         >
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
