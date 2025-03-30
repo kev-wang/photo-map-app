@@ -25,7 +25,6 @@ interface PhotoMarker {
 }
 
 const STORAGE_KEY = 'photo-map-markers';
-const USER_ID_KEY = 'photo-map-user-id';
 const LIFETIME_HOURS = 24;
 
 const AppContainer = styled.div`
@@ -206,30 +205,6 @@ const Count = styled.span<{ type: 'like' | 'dislike' }>`
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 `;
 
-const MarkerWrapper = styled.div`
-  position: relative;
-  width: 0;
-  height: 0;
-`;
-
-const UserInitials = styled.div`
-  position: absolute;
-  top: -30px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.8);
-  color: white;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  z-index: 1000;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  pointer-events: none;
-`;
-
 const InteractionButtons = styled.div`
   display: flex;
   justify-content: space-around;
@@ -259,7 +234,6 @@ function App() {
   const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [notification, setNotification] = useState('');
-  const [userId, setUserId] = useState<string>('');
   const [userLikes, setUserLikes] = useState<number>(0);
   const [userDislikes, setUserDislikes] = useState<number>(0);
   const [userInitials, setUserInitials] = useState<string>('');
@@ -267,18 +241,6 @@ function App() {
   const streamRef = useRef<MediaStream | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const notificationTimeout = useRef<number | undefined>(undefined);
-
-  // Initialize or load user ID
-  useEffect(() => {
-    const savedUserId = localStorage.getItem(USER_ID_KEY);
-    if (savedUserId) {
-      setUserId(savedUserId);
-    } else {
-      const newUserId = Math.random().toString(36).substring(7);
-      localStorage.setItem(USER_ID_KEY, newUserId);
-      setUserId(newUserId);
-    }
-  }, []);
 
   // Load markers from local storage
   useEffect(() => {
