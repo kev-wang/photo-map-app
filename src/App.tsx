@@ -18,9 +18,15 @@ interface PhotoMarker {
   position: [number, number];
   photoUrl: string;
   timestamp: number;
+  likes: number;
+  dislikes: number;
+  createdBy: string;
+  lastInteraction: number;
 }
 
 const STORAGE_KEY = 'photo-map-markers';
+const USER_ID_KEY = 'photo-map-user-id';
+const LIFETIME_HOURS = 24;
 
 const AppContainer = styled.div`
   height: 100vh;
@@ -144,15 +150,135 @@ const StyledPopup = styled(Popup)`
   }
 `;
 
+const InitialsInput = styled.input`
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  padding: 8px 12px;
+  border: 2px solid #007AFF;
+  border-radius: 8px;
+  font-size: 16px;
+  width: 120px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+
+  &::placeholder {
+    color: #999;
+  }
+
+  &:focus {
+    outline: none;
+    border-color: #0056b3;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+`;
+
+const PhotoInfo = styled.div`
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+`;
+
+const TimeRemaining = styled.span`
+  color: #00ff9d;
+  font-weight: 500;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+`;
+
+const InteractionCounts = styled.div`
+  display: flex;
+  gap: 12px;
+`;
+
+const Count = styled.span<{ type: 'like' | 'dislike' }>`
+  color: ${props => props.type === 'like' ? '#00ff9d' : '#ff4d4d'};
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+`;
+
+const MarkerWrapper = styled.div`
+  position: relative;
+  width: 0;
+  height: 0;
+`;
+
+const UserInitials = styled.div`
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+`;
+
+const InteractionButtons = styled.div`
+  display: flex;
+  justify-content: space-around;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+`;
+
+const InteractionButton = styled.button<{ disabled?: boolean }>`
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
+  opacity: ${props => props.disabled ? 0.5 : 1};
+  padding: 8px 16px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+
+  &:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+`;
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
-  const [userLocation, setUserLocation] = useState<[number, number]>([35.6762, 139.6503]);
+  const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [notification, setNotification] = useState('');
+  const [userId, setUserId] = useState<string>('');
+  const [userLikes, setUserLikes] = useState<number>(0);
+  const [userDislikes, setUserDislikes] = useState<number>(0);
+  const [userInitials, setUserInitials] = useState<string>('');
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const notificationTimeout = useRef<number | undefined>(undefined);
+
+  // Initialize or load user ID
+  useEffect(() => {
+    const savedUserId = localStorage.getItem(USER_ID_KEY);
+    if (savedUserId) {
+      setUserId(savedUserId);
+    } else {
+      const newUserId = Math.random().toString(36).substring(7);
+      localStorage.setItem(USER_ID_KEY, newUserId);
+      setUserId(newUserId);
+    }
+  }, []);
 
   // Load markers from local storage
   useEffect(() => {
@@ -160,22 +286,19 @@ function App() {
     if (savedMarkers) {
       try {
         const parsed = JSON.parse(savedMarkers);
-        console.log('Loaded markers from storage:', parsed);
-        setMarkers(parsed);
+        const currentTime = Date.now();
+        const filteredMarkers = parsed.filter((marker: PhotoMarker) => {
+          const age = (currentTime - marker.timestamp) / (1000 * 60 * 60);
+          return age < LIFETIME_HOURS || marker.likes > marker.dislikes;
+        });
+        setMarkers(filteredMarkers);
       } catch (error) {
         console.error('Error loading markers:', error);
       }
     }
   }, []);
 
-  // Save markers to local storage whenever they change
-  useEffect(() => {
-    if (markers.length > 0) {
-      console.log('Saving markers to storage:', markers);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(markers));
-    }
-  }, [markers]);
-
+  // Get user location with Singapore as fallback
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -185,6 +308,8 @@ function App() {
       },
       (error) => {
         console.error('Error getting location:', error);
+        // Default to Singapore coordinates
+        setUserLocation([1.3521, 103.8198]);
       }
     );
   }, []);
@@ -222,6 +347,11 @@ function App() {
     setIsCameraOpen(false);
   };
 
+  const handleInitialsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.slice(0, 5).toUpperCase();
+    setUserInitials(value);
+  };
+
   const capturePhoto = () => {
     if (!videoRef.current) {
       console.error('Video reference not found');
@@ -250,38 +380,85 @@ function App() {
           id: Date.now().toString(),
           position: newPosition,
           photoUrl,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          likes: 0,
+          dislikes: 0,
+          createdBy: userInitials || 'Anonymous',
+          lastInteraction: Date.now()
         };
         
-        setMarkers(prev => {
-          const updatedMarkers = [...prev, newMarker];
-          console.log('Updated markers:', updatedMarkers);
-          return updatedMarkers;
-        });
-
-        showNotification('Photo added to map! 📍');
-
-        // Close camera first
+        setMarkers(prev => [...prev, newMarker]);
         stopCamera();
-
-        // Pan to the new marker location
-        if (mapRef.current) {
-          setTimeout(() => {
-            mapRef.current?.flyTo(newPosition, 15);
-          }, 500);
-        }
+        showNotification('Photo added successfully!');
       },
       (error) => {
         console.error('Error getting location:', error);
-        showNotification('Error getting location 😕');
-        stopCamera();
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0
+        showNotification('Error getting location');
       }
     );
+  };
+
+  const handleLike = (markerId: string) => {
+    setMarkers(prevMarkers => {
+      const updatedMarkers = prevMarkers.map(marker => {
+        if (marker.id === markerId) {
+          return {
+            ...marker,
+            likes: marker.likes + 1,
+            lastInteraction: Date.now()
+          };
+        }
+        return marker;
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedMarkers));
+      return updatedMarkers;
+    });
+    setUserLikes(prev => prev + 1);
+    showNotification('Photo liked!');
+  };
+
+  const handleDislike = (markerId: string) => {
+    if (userLikes <= userDislikes) {
+      showNotification('You must like a photo before disliking');
+      return;
+    }
+
+    setMarkers(prevMarkers => {
+      const updatedMarkers = prevMarkers.map(marker => {
+        if (marker.id === markerId) {
+          return {
+            ...marker,
+            dislikes: marker.dislikes + 1,
+            lastInteraction: Date.now()
+          };
+        }
+        return marker;
+      }).filter(marker => {
+        // Remove if it's a new photo (less than 24 hours) and has been disliked
+        const age = (Date.now() - marker.timestamp) / (1000 * 60 * 60);
+        return !(age < 24 && marker.dislikes > 0);
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedMarkers));
+      return updatedMarkers;
+    });
+    setUserDislikes(prev => prev + 1);
+    showNotification('Photo disliked');
+  };
+
+  const calculateTimeRemaining = (timestamp: number): string => {
+    const now = Date.now();
+    const age = (now - timestamp) / (1000 * 60 * 60);
+    const remaining = LIFETIME_HOURS - age;
+    
+    if (remaining <= 0) return 'Expired';
+    
+    const days = Math.floor(remaining / 24);
+    const hours = Math.floor(remaining % 24);
+    
+    if (days > 0) {
+      return `${days}d ${hours}h`;
+    }
+    return `${hours}h`;
   };
 
   const mapProps: MapContainerProps & { ref?: (map: L.Map) => void } = {
@@ -301,34 +478,99 @@ function App() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   };
 
+  const createCustomIcon = (initials: string) => {
+    const divIcon = L.divIcon({
+      className: 'custom-marker',
+      html: `
+        <div style="
+          position: relative;
+          width: 25px;
+          height: 41px;
+          background-image: url('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png');
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+        ">
+          <div style="
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            pointer-events: none;
+          ">${initials}</div>
+        </div>
+      `,
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [0, -41]
+    });
+    return divIcon;
+  };
+
   return (
     <AppContainer>
+      <InitialsInput
+        type="text"
+        placeholder="Display Initials"
+        value={userInitials}
+        onChange={handleInitialsChange}
+        maxLength={5}
+      />
       <Notification isVisible={!!notification}>
         {notification}
       </Notification>
       <MapWrapper>
         <MapContainer {...mapProps}>
           <TileLayer {...tileProps} />
-          {markers.map((marker) => {
-            console.log('Rendering marker:', marker);
-            return (
-              <Marker 
-                key={marker.id} 
-                position={marker.position}
-              >
-                <StyledPopup>
-                  <img 
-                    src={marker.photoUrl} 
-                    alt="Captured photo" 
-                    style={{ width: '100%', height: 'auto', display: 'block' }}
-                  />
-                  <div style={{ padding: '8px', fontSize: '12px', color: '#666' }}>
-                    {new Date(marker.timestamp).toLocaleString()}
-                  </div>
-                </StyledPopup>
-              </Marker>
-            );
-          })}
+          {markers.map((marker) => (
+            <Marker 
+              key={marker.id} 
+              position={marker.position}
+              icon={createCustomIcon(marker.createdBy)}
+            >
+              <StyledPopup>
+                <img 
+                  src={marker.photoUrl} 
+                  alt="Captured photo" 
+                  style={{ width: '100%', height: '200px', objectFit: 'cover' }}
+                />
+                <PhotoInfo>
+                  <TimeRemaining>
+                    {calculateTimeRemaining(marker.timestamp)}
+                  </TimeRemaining>
+                  <InteractionCounts>
+                    <Count type="like">
+                      👍 {marker.likes}
+                    </Count>
+                    <Count type="dislike">
+                      👎 {marker.dislikes}
+                    </Count>
+                  </InteractionCounts>
+                </PhotoInfo>
+                <InteractionButtons>
+                  <InteractionButton onClick={() => handleLike(marker.id)}>
+                    👍
+                  </InteractionButton>
+                  <InteractionButton 
+                    onClick={() => handleDislike(marker.id)}
+                    disabled={userLikes <= userDislikes}
+                  >
+                    👎
+                  </InteractionButton>
+                </InteractionButtons>
+              </StyledPopup>
+            </Marker>
+          ))}
         </MapContainer>
       </MapWrapper>
       <AddButton onClick={startCamera}>+</AddButton>
