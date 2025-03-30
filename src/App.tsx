@@ -4,6 +4,7 @@ import type { MapContainerProps, TileLayerProps } from 'react-leaflet';
 import styled from '@emotion/styled';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { database, PhotoMarker } from './supabase';
 
 // Fix for default marker icons in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -12,17 +13,6 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
-
-interface PhotoMarker {
-  id: string;
-  position: [number, number];
-  photoUrl: string;
-  timestamp: number;
-  likes: number;
-  dislikes: number;
-  createdBy: string;
-  lastInteraction: number;
-}
 
 const STORAGE_KEY = 'photo-map-markers';
 const LIFETIME_HOURS = 24;
@@ -241,23 +231,48 @@ function App() {
   const streamRef = useRef<MediaStream | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const notificationTimeout = useRef<number | undefined>(undefined);
+  const subscriptionRef = useRef<any>(null);
 
-  // Load markers from local storage
+  // Load markers from database and set up real-time subscription
   useEffect(() => {
-    const savedMarkers = localStorage.getItem(STORAGE_KEY);
-    if (savedMarkers) {
+    const loadMarkers = async () => {
       try {
-        const parsed = JSON.parse(savedMarkers);
-        const currentTime = Date.now();
-        const filteredMarkers = parsed.filter((marker: PhotoMarker) => {
-          const age = (currentTime - marker.timestamp) / (1000 * 60 * 60);
-          return age < LIFETIME_HOURS || marker.likes > marker.dislikes;
-        });
-        setMarkers(filteredMarkers);
+        const data = await database.getMarkers();
+        console.log('Initial markers loaded:', data);
+        setMarkers(data || []);
       } catch (error) {
         console.error('Error loading markers:', error);
+        setMarkers([]);
       }
-    }
+    };
+
+    loadMarkers();
+
+    // Set up real-time subscription
+    const subscription = database.subscribeToMarkers((payload) => {
+      console.log('Received real-time update:', payload);
+      
+      if (payload.eventType === 'INSERT') {
+        setMarkers(prev => {
+          console.log('Adding new marker to state:', payload.new);
+          return [...prev, payload.new];
+        });
+      } else if (payload.eventType === 'UPDATE') {
+        setMarkers(prev => prev.map(marker => 
+          marker.id === payload.new.id ? payload.new : marker
+        ));
+      } else if (payload.eventType === 'DELETE') {
+        setMarkers(prev => prev.filter(marker => marker.id !== payload.old.id));
+      }
+    });
+
+    // Cleanup subscription on unmount
+    return () => {
+      console.log('Cleaning up subscription');
+      if (subscription) {
+        subscription.unsubscribe();
+      }
+    };
   }, []);
 
   // Get user location with Singapore as fallback
@@ -314,7 +329,7 @@ function App() {
     setUserInitials(value);
   };
 
-  const capturePhoto = () => {
+  const capturePhoto = async () => {
     if (!videoRef.current) {
       console.error('Video reference not found');
       return;
@@ -333,78 +348,79 @@ function App() {
     const photoUrl = canvas.toDataURL('image/jpeg');
     console.log('Photo captured, getting location...');
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
-        console.log('Got position for new marker:', newPosition);
-        
-        const newMarker: PhotoMarker = {
-          id: Date.now().toString(),
-          position: newPosition,
-          photoUrl,
-          timestamp: Date.now(),
-          likes: 0,
-          dislikes: 0,
-          createdBy: userInitials || 'Anonymous',
-          lastInteraction: Date.now()
-        };
-        
-        setMarkers(prev => [...prev, newMarker]);
-        stopCamera();
-        showNotification('Photo added successfully!');
-      },
-      (error) => {
-        console.error('Error getting location:', error);
-        showNotification('Error getting location');
-      }
-    );
-  };
-
-  const handleLike = (markerId: string) => {
-    setMarkers(prevMarkers => {
-      const updatedMarkers = prevMarkers.map(marker => {
-        if (marker.id === markerId) {
-          return {
-            ...marker,
-            likes: marker.likes + 1,
-            lastInteraction: Date.now()
-          };
-        }
-        return marker;
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject);
       });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedMarkers));
-      return updatedMarkers;
-    });
-    setUserLikes(prev => prev + 1);
-    showNotification('Photo liked!');
+
+      const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
+      console.log('Got position for new marker:', newPosition);
+      
+      const newMarker = {
+        position: newPosition,
+        photo_url: photoUrl,
+        timestamp: Date.now(),
+        likes: 0,
+        dislikes: 0,
+        created_by: userInitials || 'Anonymous',
+        last_interaction: Date.now()
+      };
+      
+      console.log('Saving new marker:', newMarker);
+      const savedMarker = await database.addMarker(newMarker);
+      console.log('Marker saved successfully:', savedMarker);
+      
+      stopCamera();
+      showNotification('Photo added successfully!');
+    } catch (error) {
+      console.error('Error adding marker:', error);
+      showNotification('Error adding photo');
+    }
   };
 
-  const handleDislike = (markerId: string) => {
+  const handleLike = async (markerId: string) => {
+    try {
+      const marker = markers.find(m => m.id === markerId);
+      if (!marker) return;
+
+      const newTimestamp = marker.timestamp - (24 * 60 * 60 * 1000);
+      await database.updateMarker(markerId, {
+        likes: marker.likes + 1,
+        timestamp: newTimestamp,
+        last_interaction: Date.now()
+      });
+      
+      setUserLikes(prev => prev + 1);
+      showNotification('Photo liked! Time extended by 24 hours');
+    } catch (error) {
+      console.error('Error liking marker:', error);
+      showNotification('Error liking photo');
+    }
+  };
+
+  const handleDislike = async (markerId: string) => {
     if (userLikes <= userDislikes) {
       showNotification('You must like a photo before disliking');
       return;
     }
 
-    setMarkers(prevMarkers => {
-      const updatedMarkers = prevMarkers.map(marker => {
-        if (marker.id === markerId) {
-          return {
-            ...marker,
-            dislikes: marker.dislikes + 1,
-            lastInteraction: Date.now()
-          };
-        }
-        return marker;
-      }).filter(marker => {
-        // Remove if it's a new photo (less than 24 hours) and has been disliked
-        const age = (Date.now() - marker.timestamp) / (1000 * 60 * 60);
-        return !(age < 24 && marker.dislikes > 0);
+    try {
+      const marker = markers.find(m => m.id === markerId);
+      if (!marker) return;
+
+      const newTimestamp = marker.timestamp + (24 * 60 * 60 * 1000);
+      await database.updateMarker(markerId, {
+        dislikes: marker.dislikes + 1,
+        timestamp: newTimestamp,
+        last_interaction: Date.now()
       });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedMarkers));
-      return updatedMarkers;
-    });
-    setUserDislikes(prev => prev + 1);
-    showNotification('Photo disliked');
+      
+      setUserDislikes(prev => prev + 1);
+      showNotification('Photo disliked. Time reduced by 24 hours');
+    } catch (error) {
+      console.error('Error disliking marker:', error);
+      showNotification('Error disliking photo');
+    }
   };
 
   const calculateTimeRemaining = (timestamp: number): string => {
@@ -498,11 +514,11 @@ function App() {
             <Marker 
               key={marker.id} 
               position={marker.position}
-              icon={createCustomIcon(marker.createdBy)}
+              icon={createCustomIcon(marker.created_by)}
             >
               <StyledPopup>
                 <img 
-                  src={marker.photoUrl} 
+                  src={marker.photo_url} 
                   alt="Captured photo" 
                   style={{ width: '100%', height: '200px', objectFit: 'cover' }}
                 />
