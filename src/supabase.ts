@@ -18,7 +18,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 });
 
 // Test the connection
-supabase.from('photo_markers').select('count').then(({ data, error }) => {
+supabase.from('photo_markers').select('count').then(({ error }) => {
   if (error) {
     console.error('Supabase connection error:', error);
   } else {

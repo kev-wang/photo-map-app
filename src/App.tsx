@@ -14,7 +14,6 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const STORAGE_KEY = 'photo-map-markers';
 const LIFETIME_HOURS = 24;
 
 const AppContainer = styled.div`
@@ -231,7 +230,6 @@ function App() {
   const streamRef = useRef<MediaStream | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const notificationTimeout = useRef<number | undefined>(undefined);
-  const subscriptionRef = useRef<any>(null);
 
   // Load markers from database and set up real-time subscription
   useEffect(() => {
