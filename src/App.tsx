@@ -616,16 +616,11 @@ function App() {
             bottom: -35px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 4px 10px;
-            border-radius: 4px;
+            color: #1a237e;
             font-size: 12px;
             font-weight: 500;
             white-space: nowrap;
             z-index: 1000;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.1);
             pointer-events: none;
           ">${initials}</div>
         </div>
@@ -635,6 +630,62 @@ function App() {
       popupAnchor: [0, -41]
     });
     return divIcon;
+  };
+
+  const createUserLocationIcon = () => {
+    return L.divIcon({
+      className: 'user-location-marker',
+      html: `
+        <div style="
+          position: relative;
+          width: 24px;
+          height: 24px;
+        ">
+          <div style="
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 18px;
+            height: 18px;
+            background-color: #4285F4;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 0 2px #4285F4;
+            animation: pulse 2s infinite;
+          "></div>
+          <div style="
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 6px;
+            height: 6px;
+            background-color: white;
+            border-radius: 50%;
+            z-index: 1;
+          "></div>
+          <style>
+            @keyframes pulse {
+              0% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 1;
+              }
+              50% {
+                transform: translate(-50%, -50%) scale(1.5);
+                opacity: 0.5;
+              }
+              100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 1;
+              }
+            }
+          </style>
+        </div>
+      `,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    });
   };
 
   const handleTestConnection = async () => {
@@ -662,6 +713,12 @@ function App() {
       <MapWrapper>
         <MapContainer {...mapProps}>
           <TileLayer {...tileProps} />
+          {userLocation && (
+            <Marker
+              position={userLocation}
+              icon={createUserLocationIcon()}
+            />
+          )}
           {markers
             .filter(marker => !isMarkerExpired(marker.timestamp))
             .map((marker) => {
