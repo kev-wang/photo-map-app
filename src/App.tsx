@@ -198,6 +198,7 @@ const InitialsInput = styled.input`
   text-align: center;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  color: #1a237e;
 
   &::placeholder {
     color: #999;
