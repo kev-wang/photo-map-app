@@ -5,6 +5,7 @@ import styled from '@emotion/styled';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { database, PhotoMarker, testSupabaseConnection } from './supabase';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 // Fix for default marker icons in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -14,7 +15,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const LIFETIME_HOURS = 24;
+const LIFETIME_HOURS = 168;
 
 const AppContainer = styled.div`
   height: 100vh;
@@ -109,9 +110,46 @@ const CameraButton = styled.button`
   justify-content: center;
   font-size: 18px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  position: relative;
+  overflow: hidden;
 
   &:active {
     transform: scale(0.95);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+`;
+
+const LoadingOverlay = styled.div<{ isVisible: boolean }>`
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  display: ${props => props.isVisible ? 'flex' : 'none'};
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  z-index: 1;
+
+  &::after {
+    content: '';
+    width: 30px;
+    height: 30px;
+    border: 3px solid #007AFF;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 `;
 
@@ -173,14 +211,20 @@ const InitialsInput = styled.input`
 `;
 
 const PhotoInfo = styled.div`
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.7);
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 6px 10px;
+  background: rgba(40, 40, 40, 0.85);
   color: white;
   font-size: 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0 0 8px 0;
+  z-index: 2;
+  min-width: 120px;
+  width: auto;
 `;
 
 const TimeRemaining = styled.span`
@@ -240,13 +284,23 @@ function App() {
   const streamRef = useRef<MediaStream | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const notificationTimeout = useRef<number | undefined>(undefined);
+  const [isCapturing, setIsCapturing] = useState(false);
 
   // Function to load markers
   const loadMarkers = async () => {
+    console.log('Starting to load markers...');
     try {
+      console.log('Attempting to fetch markers from database...');
       const data = await database.getMarkers();
-      console.log('Initial markers loaded:', data);
-      setMarkers(data || []);
+      console.log('Database response:', data);
+      if (data) {
+        console.log('Number of markers loaded:', data.length);
+        console.log('Markers data:', JSON.stringify(data, null, 2));
+        setMarkers(data);
+      } else {
+        console.log('No markers data received from database');
+        setMarkers([]);
+      }
     } catch (error) {
       console.error('Error loading markers:', error);
       setMarkers([]);
@@ -255,28 +309,69 @@ function App() {
 
   // Load markers from database and set up real-time subscription
   useEffect(() => {
-    loadMarkers();
-  }, []);
+    let subscription: RealtimeChannel | null = null;
 
-  // Add logging for popup state changes
-  useEffect(() => {
-    console.log('Popup state changed:', { openPopupId });
-  }, [openPopupId]);
+    const setupSubscription = async () => {
+      try {
+        // Test database connection first
+        const isConnected = await testSupabaseConnection();
+        if (!isConnected) {
+          showNotification('Database connection error. Please refresh the page.');
+          return;
+        }
+
+        // Set up real-time subscription first
+        subscription = database.subscribeToMarkers((payload) => {
+          console.log('Real-time update received:', payload);
+          if (payload.eventType === 'INSERT') {
+            setMarkers(prev => [...prev, payload.new]);
+          } else if (payload.eventType === 'UPDATE') {
+            setMarkers(prev => prev.map(marker => 
+              marker.id === payload.new.id ? payload.new : marker
+            ));
+          } else if (payload.eventType === 'DELETE') {
+            setMarkers(prev => prev.filter(marker => marker.id !== payload.old.id));
+          }
+        });
+
+        // Then load initial markers
+        await loadMarkers();
+      } catch (error) {
+        console.error('Error setting up subscription:', error);
+        showNotification('Error connecting to database. Please refresh the page.');
+      }
+    };
+
+    // Start loading immediately
+    setupSubscription();
+
+    // Cleanup subscription on unmount
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe();
+      }
+    };
+  }, []);
 
   // Get user location with Singapore as fallback
   useEffect(() => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const newLocation: [number, number] = [position.coords.latitude, position.coords.longitude];
-        console.log('Setting user location:', newLocation);
-        setUserLocation(newLocation);
-      },
-      (error) => {
-        console.error('Error getting location:', error);
-        // Default to Singapore coordinates
-        setUserLocation([1.3521, 103.8198]);
-      }
-    );
+    const getLocation = () => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const newLocation: [number, number] = [position.coords.latitude, position.coords.longitude];
+          console.log('Setting user location:', newLocation);
+          setUserLocation(newLocation);
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          // Default to Singapore coordinates
+          setUserLocation([1.3521, 103.8198]);
+        },
+        { timeout: 5000, maximumAge: 0, enableHighAccuracy: true }
+      );
+    };
+
+    getLocation();
   }, []);
 
   const showNotification = (message: string) => {
@@ -351,11 +446,15 @@ function App() {
   };
 
   const capturePhoto = async () => {
+    if (isCapturing) return; // Prevent multiple clicks
+    
+    setIsCapturing(true);
     console.log('Capture photo button clicked');
     
     if (!videoRef.current) {
       console.error('Video reference not found');
       showNotification('Error: Camera not initialized');
+      setIsCapturing(false);
       return;
     }
 
@@ -365,6 +464,7 @@ function App() {
         height: videoRef.current.videoHeight
       });
       showNotification('Error: Camera not ready');
+      setIsCapturing(false);
       return;
     }
 
@@ -381,6 +481,7 @@ function App() {
       if (!context) {
         console.error('Could not get canvas context');
         showNotification('Error: Could not process photo');
+        setIsCapturing(false);
         return;
       }
 
@@ -435,6 +536,16 @@ function App() {
       try {
         const savedMarker = await database.addMarker(newMarker);
         console.log('Marker saved successfully:', savedMarker);
+        
+        // Immediately add the new marker to the state
+        if (savedMarker) {
+          setMarkers(prev => [savedMarker, ...prev]);
+          // Center the map on the new marker
+          if (mapRef.current) {
+            mapRef.current.setView(newPosition, mapRef.current.getZoom());
+          }
+        }
+        
         stopCamera();
         showNotification('Photo added successfully!');
       } catch (dbError) {
@@ -460,6 +571,11 @@ function App() {
       } else {
         showNotification('Error adding photo. Please try again.');
       }
+    } finally {
+      // Reset capturing state after 2 seconds
+      setTimeout(() => {
+        setIsCapturing(false);
+      }, 2000);
     }
   };
 
@@ -487,14 +603,14 @@ function App() {
         ...prev,
         [markerId]: 'like'
       }));
-      showNotification('Photo liked! Time extended by 24 hours');
+      showNotification('Photo liked! Time extended by 168 hours');
 
-      // Update database in background - FIXED: ADD 24 hours to extend life
-      const newTimestamp = marker.timestamp + (24 * 60 * 60 * 1000);
+      // Update database in background - FIXED: ADD 168 hours to extend life
+      const newTimestamp = marker.timestamp + (168 * 60 * 60 * 1000);
       console.log('Updating marker timestamp:', {
         oldTimestamp: new Date(marker.timestamp).toLocaleString(),
         newTimestamp: new Date(newTimestamp).toLocaleString(),
-        difference: '24 hours added'
+        difference: '168 hours added'
       });
       
       await database.updateMarker(markerId, {
@@ -538,14 +654,14 @@ function App() {
         ...prev,
         [markerId]: 'dislike'
       }));
-      showNotification('Photo disliked. Time reduced by 24 hours');
+      showNotification('Photo disliked. Time reduced by 168 hours');
 
-      // Update database in background - FIXED: SUBTRACT 24 hours to reduce life
-      const newTimestamp = marker.timestamp - (24 * 60 * 60 * 1000);
+      // Update database in background - FIXED: SUBTRACT 168 hours to reduce life
+      const newTimestamp = marker.timestamp - (168 * 60 * 60 * 1000);
       console.log('Updating marker timestamp:', {
         oldTimestamp: new Date(marker.timestamp).toLocaleString(),
         newTimestamp: new Date(newTimestamp).toLocaleString(),
-        difference: '24 hours subtracted'
+        difference: '168 hours subtracted'
       });
       
       await database.updateMarker(markerId, {
@@ -598,14 +714,14 @@ function App() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
   };
 
-  const createCustomIcon = (initials: string) => {
+  const createCustomIcon = (initials: string, photoUrl: string) => {
     const divIcon = L.divIcon({
       className: 'custom-marker',
       html: `
         <div style="
           position: relative;
-          width: 25px;
-          height: 41px;
+          width: 40px;
+          height: 56px;
           background-image: url('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png');
           background-size: contain;
           background-repeat: no-repeat;
@@ -613,7 +729,30 @@ function App() {
         ">
           <div style="
             position: absolute;
-            bottom: -35px;
+            top: calc(50% - 9px);
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 1;
+          ">
+            <img 
+              src="${photoUrl}" 
+              alt="Preview" 
+              style="
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+              "
+            />
+          </div>
+          <div style="
+            position: absolute;
+            bottom: -28px;
             left: 50%;
             transform: translateX(-50%);
             color: #1a237e;
@@ -622,12 +761,16 @@ function App() {
             white-space: nowrap;
             z-index: 1000;
             pointer-events: none;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 2px 6px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
           ">${initials}</div>
         </div>
       `,
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-      popupAnchor: [0, -41]
+      iconSize: [40, 56],
+      iconAnchor: [20, 56],
+      popupAnchor: [0, -56]
     });
     return divIcon;
   };
@@ -688,16 +831,6 @@ function App() {
     });
   };
 
-  const handleTestConnection = async () => {
-    console.log('Testing Supabase connection...');
-    const isConnected = await testSupabaseConnection();
-    if (isConnected) {
-      showNotification('Supabase connection successful!');
-    } else {
-      showNotification('Supabase connection failed. Check console for details.');
-    }
-  };
-
   return (
     <AppContainer>
       <InitialsInput
@@ -727,7 +860,7 @@ function App() {
                 <Marker 
                   key={marker.id}
                   position={marker.position}
-                  icon={createCustomIcon(marker.created_by)}
+                  icon={createCustomIcon(marker.created_by, marker.photo_url)}
                   eventHandlers={{
                     click: (e: { originalEvent: MouseEvent }) => {
                       e.originalEvent.stopPropagation();
@@ -769,39 +902,35 @@ function App() {
                           e.preventDefault();
                         }}
                       >
-                        <img 
-                          src={marker.photo_url} 
-                          alt="Captured photo" 
-                          style={{ 
-                            width: '100%', 
-                            height: '200px', 
-                            objectFit: 'cover',
-                            pointerEvents: 'none'
-                          }}
-                        />
-                        <PhotoInfo>
-                          <TimeRemaining>
-                            {calculateTimeRemaining(marker.timestamp)}
-                          </TimeRemaining>
-                          <InteractionCounts>
-                            <Count type="like">
-                              👍 {marker.likes}
-                            </Count>
-                            <Count type="dislike">
-                              👎 {marker.dislikes}
-                            </Count>
-                          </InteractionCounts>
-                        </PhotoInfo>
-                        <InteractionButtons>
-                          <InteractionButton 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleLike(marker.id);
+                        <div style={{ position: 'relative' }}>
+                          <img 
+                            src={marker.photo_url} 
+                            alt="Captured photo" 
+                            style={{ 
+                              width: '100%', 
+                              height: '200px', 
+                              objectFit: 'cover',
+                              pointerEvents: 'none',
+                              display: 'block',
+                              borderTopLeftRadius: '8px',
+                              borderTopRightRadius: '8px'
                             }}
-                            disabled={!!cardInteractions[marker.id]}
-                          >
-                            👍
-                          </InteractionButton>
+                          />
+                          <PhotoInfo>
+                            <TimeRemaining>
+                              {calculateTimeRemaining(marker.timestamp)}
+                            </TimeRemaining>
+                            <InteractionCounts>
+                              <Count type="like">
+                                👍 {marker.likes}
+                              </Count>
+                              <Count type="dislike">
+                                👎 {marker.dislikes}
+                              </Count>
+                            </InteractionCounts>
+                          </PhotoInfo>
+                        </div>
+                        <InteractionButtons>
                           <InteractionButton 
                             onClick={(e) => {
                               e.stopPropagation();
@@ -810,6 +939,15 @@ function App() {
                             disabled={!!cardInteractions[marker.id] || userLikes <= userDislikes}
                           >
                             👎
+                          </InteractionButton>
+                          <InteractionButton 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleLike(marker.id);
+                            }}
+                            disabled={!!cardInteractions[marker.id]}
+                          >
+                            👍
                           </InteractionButton>
                         </InteractionButtons>
                       </div>
@@ -821,26 +959,6 @@ function App() {
         </MapContainer>
       </MapWrapper>
       <AddButton onClick={startCamera}>+</AddButton>
-      <button 
-        onClick={handleTestConnection}
-        style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          padding: '8px 12px',
-          backgroundColor: '#007AFF',
-          color: 'white',
-          border: 'none',
-          borderRadius: '6px',
-          cursor: 'pointer',
-          fontSize: '14px',
-          fontWeight: 'bold',
-          boxShadow: '0 2px 6px rgba(0, 0, 0, 0.3)',
-          zIndex: 1000
-        }}
-      >
-        Test DB
-      </button>
       <CameraOverlay isVisible={isCameraOpen}>
         <CameraPreview 
           ref={videoRef} 
@@ -864,8 +982,10 @@ function App() {
               console.log('Capture button clicked');
               capturePhoto();
             }}
+            disabled={isCapturing}
           >
             📸
+            <LoadingOverlay isVisible={isCapturing} />
           </CameraButton>
         </CameraControls>
       </CameraOverlay>

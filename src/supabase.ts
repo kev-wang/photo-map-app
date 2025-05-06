@@ -18,13 +18,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 });
 
 // Test the connection
-supabase.from('photo_markers').select('count').then(({ error }) => {
+export const testSupabaseConnection = async () => {
+  const { error } = await supabase.from('photo_markers').select('count');
   if (error) {
     console.error('Supabase connection error:', error);
-  } else {
-    console.log('Supabase connected successfully');
+    return false;
   }
-});
+  console.log('Supabase connected successfully');
+  return true;
+};
 
 export interface PhotoMarker {
   id: string;
@@ -40,12 +42,18 @@ export interface PhotoMarker {
 export const database = {
   // Get all active markers
   getMarkers: async () => {
+    console.log('Executing getMarkers query...');
     const { data, error } = await supabase
       .from('photo_markers')
       .select('*')
-      .order('timestamp', { ascending: false });
+      .order('timestamp', { ascending: false })
+      .limit(100); // Limit to 100 markers to prevent overloading
 
-    if (error) throw error;
+    if (error) {
+      console.error('Database query error:', error);
+      throw error;
+    }
+    console.log('Query successful, markers found:', data?.length || 0);
     return data;
   },
 
