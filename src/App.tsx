@@ -603,8 +603,8 @@ function App() {
       const thumbBlob = await generateThumbnail(fullBlob, 64);
       // Upload both to Supabase Storage
       const fileId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const { data: fullUpload, error: fullError } = await supabase.storage.from('photos').upload(`full/${fileId}.jpg`, fullBlob, { upsert: true });
-      const { data: thumbUpload, error: thumbError } = await supabase.storage.from('photos').upload(`thumb/${fileId}.jpg`, thumbBlob, { upsert: true });
+      const { error: fullError } = await supabase.storage.from('photos').upload(`full/${fileId}.jpg`, fullBlob, { upsert: true });
+      const { error: thumbError } = await supabase.storage.from('photos').upload(`thumb/${fileId}.jpg`, thumbBlob, { upsert: true });
       if (fullError || thumbError) {
         showNotification('Error uploading photo.');
         setIsCapturing(false);
