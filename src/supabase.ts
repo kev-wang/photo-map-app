@@ -31,12 +31,13 @@ export const testSupabaseConnection = async () => {
 export interface PhotoMarker {
   id: string;
   position: [number, number];
-  photo_url: string;
+  photo_url?: string;
   timestamp: number;
   likes: number;
   dislikes: number;
   created_by: string;
   last_interaction: number;
+  thumbnail_url?: string;
 }
 
 export const database = {
@@ -45,7 +46,7 @@ export const database = {
     console.log('Executing getMarkers query...');
     const { data, error } = await supabase
       .from('photo_markers')
-      .select('*')
+      .select('id,position,created_by,timestamp,likes,dislikes,last_interaction,thumbnail_url')
       .order('timestamp', { ascending: false })
       .limit(100); // Limit to 100 markers to prevent overloading
 
@@ -55,6 +56,21 @@ export const database = {
     }
     console.log('Query successful, markers found:', data?.length || 0);
     return data;
+  },
+
+  // Get full photo URL for a specific marker
+  getPhotoUrl: async (markerId: string) => {
+    const { data, error } = await supabase
+      .from('photo_markers')
+      .select('photo_url')
+      .eq('id', markerId)
+      .single();
+
+    if (error) {
+      console.error('Error fetching photo URL:', error);
+      throw error;
+    }
+    return data.photo_url;
   },
 
   // Add a new marker
@@ -80,20 +96,6 @@ export const database = {
 
     if (error) throw error;
     return data;
-  },
-
-  // Delete expired markers
-  deleteExpiredMarkers: async () => {
-    const LIFETIME_HOURS = 24;
-    const currentTime = Date.now();
-    const expirationTime = currentTime - (LIFETIME_HOURS * 60 * 60 * 1000);
-
-    const { error } = await supabase
-      .from('photo_markers')
-      .delete()
-      .lt('timestamp', expirationTime);
-
-    if (error) throw error;
   },
 
   // Subscribe to marker changes

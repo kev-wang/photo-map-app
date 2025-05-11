@@ -4,8 +4,14 @@ import type { MapContainerProps, TileLayerProps } from 'react-leaflet';
 import styled from '@emotion/styled';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { database, PhotoMarker, testSupabaseConnection } from './supabase';
+import { database, PhotoMarker as BasePhotoMarker, testSupabaseConnection, supabase } from './supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { TermsAndConditions } from './TermsAndConditions';
+import ReactGA from 'react-ga4';
+import { FaPencilAlt } from 'react-icons/fa';
+
+// Initialize Google Analytics with the provided Measurement ID
+ReactGA.initialize('G-Z47SXMLQPL');
 
 // Fix for default marker icons in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -21,18 +27,16 @@ const AppContainer = styled.div`
   height: 100vh;
   width: 100vw;
   position: relative;
+  overflow: hidden;
 `;
 
 const MapWrapper = styled.div`
   height: 100%;
   width: 100%;
+  flex: 1 1 auto;
 `;
 
 const AddButton = styled.button`
-  position: absolute;
-  bottom: 100px;
-  left: 50%;
-  transform: translateX(-50%);
   width: 60px;
   height: 60px;
   border-radius: 50%;
@@ -48,7 +52,7 @@ const AddButton = styled.button`
   z-index: 1000;
 
   &:active {
-    transform: translateX(-50%) scale(0.95);
+    transform: scale(0.95);
   }
 `;
 
@@ -184,33 +188,6 @@ const StyledPopup = styled(Popup)`
   }
 `;
 
-const InitialsInput = styled.input`
-  position: absolute;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1000;
-  padding: 8px 12px;
-  border: 2px solid #007AFF;
-  border-radius: 8px;
-  font-size: 16px;
-  width: 120px;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  color: #1a237e;
-
-  &::placeholder {
-    color: #999;
-  }
-
-  &:focus {
-    outline: none;
-    border-color: #0056b3;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  }
-`;
-
 const PhotoInfo = styled.div`
   position: absolute;
   top: 0;
@@ -271,6 +248,123 @@ const InteractionButton = styled.button<{ disabled?: boolean }>`
   }
 `;
 
+const BlurredWrapper = styled.div<{ blurred: boolean }>`
+  height: 100%;
+  width: 100%;
+  filter: ${({ blurred }) => (blurred ? 'blur(4px)' : 'none')};
+  pointer-events: ${({ blurred }) => (blurred ? 'none' : 'auto')};
+  transition: filter 0.3s ease;
+  display: flex;
+  flex-direction: column;
+`;
+
+const CreatedByLabel = styled.span`
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a237e;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 2px 6px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+`;
+
+const PencilIcon = styled(FaPencilAlt)`
+  margin-left: 4px;
+  font-size: 10px;
+  color: #007AFF;
+  cursor: pointer;
+  vertical-align: middle;
+`;
+
+const InlineInput = styled.input`
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a237e;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 2px 6px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border: 1.5px solid #007AFF;
+  width: 70px;
+  outline: none;
+`;
+
+const CenteredAddButton = styled(AddButton)`
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+`;
+
+const InitialsRow = styled.div`
+  position: absolute;
+  bottom: 100px;
+  left: calc(50% + 50px);
+  display: flex;
+  align-items: center;
+  z-index: 1000;
+  gap: 8px;
+  height: 60px;
+  margin-top: 8px;
+`;
+
+const AsText = styled.span`
+  margin-left: 16px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #007AFF;
+`;
+
+// Add thumbnail_url to PhotoMarker type for correct typing
+type PhotoMarker = BasePhotoMarker & { thumbnail_url?: string };
+
+// Helper to generate a thumbnail from an image blob
+async function generateThumbnail(blob: Blob, maxSize = 64): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      if (width > height) {
+        if (width > maxSize) {
+          height *= maxSize / width;
+          width = maxSize;
+        }
+      } else {
+        if (height > maxSize) {
+          width *= maxSize / height;
+          height = maxSize;
+        }
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Could not get canvas context for thumbnail'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((thumbBlob) => {
+        if (thumbBlob) {
+          resolve(thumbBlob);
+        } else {
+          reject(new Error('Could not create thumbnail blob'));
+        }
+        URL.revokeObjectURL(url);
+      }, 'image/jpeg', 0.7);
+    };
+    img.onerror = () => {
+      reject(new Error('Could not load image for thumbnail'));
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  });
+}
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
@@ -278,14 +372,24 @@ function App() {
   const [notification, setNotification] = useState('');
   const [userLikes, setUserLikes] = useState<number>(0);
   const [userDislikes, setUserDislikes] = useState<number>(0);
-  const [userInitials, setUserInitials] = useState<string>('');
+  const [userInitials, setUserInitials] = useState<string>(() => {
+    return localStorage.getItem('userInitials') || 'Anonymous';
+  });
+  const [editingInitials, setEditingInitials] = useState(false);
   const [openPopupId, setOpenPopupId] = useState<string | null>(null);
   const [cardInteractions, setCardInteractions] = useState<Record<string, 'like' | 'dislike'>>({});
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [loadedPhotoUrls, setLoadedPhotoUrls] = useState<Record<string, string>>({});
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const notificationTimeout = useRef<number | undefined>(undefined);
   const [isCapturing, setIsCapturing] = useState(false);
+
+  // Track app load (pageview)
+  useEffect(() => {
+    ReactGA.send({ hitType: 'pageview', page: window.location.pathname + window.location.search });
+  }, []);
 
   // Function to load markers
   const loadMarkers = async () => {
@@ -375,6 +479,11 @@ function App() {
     getLocation();
   }, []);
 
+  // Save initials to localStorage
+  useEffect(() => {
+    localStorage.setItem('userInitials', userInitials);
+  }, [userInitials]);
+
   const showNotification = (message: string) => {
     setNotification(message);
     if (notificationTimeout.current) {
@@ -386,6 +495,7 @@ function App() {
   };
 
   const startCamera = async () => {
+    ReactGA.event({ category: 'Photo', action: 'Start Camera' });
     try {
       console.log('Starting camera...');
       const constraints = {
@@ -441,146 +551,106 @@ function App() {
     console.log('Camera stopped');
   };
 
-  const handleInitialsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handler for editing initials
+  const handleInitialsLabelClick = () => {
+    setEditingInitials(true);
+  };
+  const handleInitialsInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.slice(0, 5).toUpperCase();
     setUserInitials(value);
   };
+  const handleInitialsInputBlur = () => {
+    if (!userInitials.trim()) setUserInitials('Anonymous');
+    setEditingInitials(false);
+  };
+  const handleInitialsInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      if (!userInitials.trim()) setUserInitials('Anonymous');
+      setEditingInitials(false);
+    }
+  };
 
   const capturePhoto = async () => {
+    ReactGA.event({ category: 'Photo', action: 'Capture Photo' });
     if (isCapturing) return; // Prevent multiple clicks
-    
     setIsCapturing(true);
-    console.log('Capture photo button clicked');
-    
     if (!videoRef.current) {
-      console.error('Video reference not found');
       showNotification('Error: Camera not initialized');
       setIsCapturing(false);
       return;
     }
-
     if (!videoRef.current.videoWidth || !videoRef.current.videoHeight) {
-      console.error('Video dimensions not available:', {
-        width: videoRef.current.videoWidth,
-        height: videoRef.current.videoHeight
-      });
       showNotification('Error: Camera not ready');
       setIsCapturing(false);
       return;
     }
-
     try {
-      console.log('Starting photo capture process...');
+      // Capture full image
       const canvas = document.createElement('canvas');
-      
-      // Ensure canvas dimensions match video dimensions
       canvas.width = videoRef.current.videoWidth;
       canvas.height = videoRef.current.videoHeight;
-      console.log('Canvas created with dimensions:', { width: canvas.width, height: canvas.height });
-      
       const context = canvas.getContext('2d');
       if (!context) {
-        console.error('Could not get canvas context');
         showNotification('Error: Could not process photo');
         setIsCapturing(false);
         return;
       }
-
-      // Draw the current video frame to the canvas
       context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      
-      // Convert to blob first for better iOS compatibility
-      const blob = await new Promise<Blob>((resolve) => {
-        canvas.toBlob((blob) => {
-          if (blob) resolve(blob);
-        }, 'image/jpeg', 0.95);
+      const fullBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => { if (blob) resolve(blob); else reject(new Error('Could not create photo blob')); }, 'image/jpeg', 0.95);
       });
-      
-      // Convert blob to data URL
-      const photoUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-      
-      console.log('Photo captured successfully, size:', photoUrl.length, 'bytes');
-
-      console.log('Getting current location...');
+      // Generate thumbnail
+      const thumbBlob = await generateThumbnail(fullBlob, 64);
+      // Upload both to Supabase Storage
+      const fileId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const { data: fullUpload, error: fullError } = await supabase.storage.from('photos').upload(`full/${fileId}.jpg`, fullBlob, { upsert: true });
+      const { data: thumbUpload, error: thumbError } = await supabase.storage.from('photos').upload(`thumb/${fileId}.jpg`, thumbBlob, { upsert: true });
+      if (fullError || thumbError) {
+        showNotification('Error uploading photo.');
+        setIsCapturing(false);
+        return;
+      }
+      const { data: fullUrlData } = supabase.storage.from('photos').getPublicUrl(`full/${fileId}.jpg`);
+      const { data: thumbUrlData } = supabase.storage.from('photos').getPublicUrl(`thumb/${fileId}.jpg`);
+      const photoUrl = fullUrlData.publicUrl;
+      const thumbnailUrl = thumbUrlData.publicUrl;
+      // Get location
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            console.log('Location obtained:', pos.coords);
-            resolve(pos);
-          },
-          (error) => {
-            console.error('Geolocation error:', error);
-            reject(error);
-          },
-          { timeout: 10000, maximumAge: 0, enableHighAccuracy: true }
-        );
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000, maximumAge: 0, enableHighAccuracy: true });
       });
-
       const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
-      console.log('Preparing marker data with position:', newPosition);
-      
       const newMarker = {
         position: newPosition,
         photo_url: photoUrl,
+        thumbnail_url: thumbnailUrl,
         timestamp: Date.now(),
         likes: 0,
         dislikes: 0,
         created_by: userInitials || 'Anonymous',
         last_interaction: Date.now()
       };
-      
-      console.log('Attempting to save marker to database...');
       try {
         const savedMarker = await database.addMarker(newMarker);
-        console.log('Marker saved successfully:', savedMarker);
-        
-        // Immediately add the new marker to the state
         if (savedMarker) {
           setMarkers(prev => [savedMarker, ...prev]);
-          // Center the map on the new marker
           if (mapRef.current) {
             mapRef.current.setView(newPosition, mapRef.current.getZoom());
           }
         }
-        
         stopCamera();
         showNotification('Photo added successfully!');
       } catch (dbError) {
-        console.error('Database error in capturePhoto:', {
-          error: dbError,
-          message: dbError instanceof Error ? dbError.message : 'Unknown error',
-          stack: dbError instanceof Error ? dbError.stack : undefined
-        });
         showNotification('Error saving photo to database. Please try again.');
       }
     } catch (error) {
-      console.error('Error in capturePhoto:', {
-        error,
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      if (error instanceof GeolocationPositionError) {
-        console.error('Geolocation error details:', {
-          code: error.code,
-          message: error.message
-        });
-        showNotification('Error: Could not get location. Please enable location services.');
-      } else {
-        showNotification('Error adding photo. Please try again.');
-      }
+      showNotification('Error adding photo. Please try again.');
     } finally {
-      // Reset capturing state after 2 seconds
-      setTimeout(() => {
-        setIsCapturing(false);
-      }, 2000);
+      setTimeout(() => { setIsCapturing(false); }, 2000);
     }
   };
 
   const handleLike = async (markerId: string) => {
+    ReactGA.event({ category: 'Photo', action: 'Like', label: markerId });
     // Check if user has already interacted with this card
     if (cardInteractions[markerId]) {
       showNotification('You have already interacted with this photo');
@@ -627,6 +697,7 @@ function App() {
   };
 
   const handleDislike = async (markerId: string) => {
+    ReactGA.event({ category: 'Photo', action: 'Dislike', label: markerId });
     // Check if user has already interacted with this card
     if (cardInteractions[markerId]) {
       showNotification('You have already interacted with this photo');
@@ -715,7 +786,7 @@ function App() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
   };
 
-  const createCustomIcon = (initials: string, photoUrl: string) => {
+  const createCustomIcon = (initials: string, thumbnailUrl: string) => {
     const divIcon = L.divIcon({
       className: 'custom-marker',
       html: `
@@ -742,7 +813,7 @@ function App() {
             z-index: 1;
           ">
             <img 
-              src="${photoUrl}" 
+              src="${thumbnailUrl}" 
               alt="Preview" 
               style="
                 width: 100%;
@@ -832,164 +903,221 @@ function App() {
     });
   };
 
+  const handleTermsAccept = () => {
+    ReactGA.event({ category: 'T&C', action: 'Accept' });
+    setTermsAccepted(true);
+  };
+
+  // Example: Track marker popup open/close
+  const handleMarkerPopupOpen = async (markerId: string) => {
+    ReactGA.event({ category: 'Photo', action: 'Open Popup', label: markerId });
+    setOpenPopupId(markerId);
+    
+    // Load the full photo URL if not already loaded
+    if (!loadedPhotoUrls[markerId]) {
+      try {
+        const photoUrl = await database.getPhotoUrl(markerId);
+        setLoadedPhotoUrls(prev => ({
+          ...prev,
+          [markerId]: photoUrl
+        }));
+      } catch (error) {
+        console.error('Error loading photo URL:', error);
+        showNotification('Error loading photo');
+      }
+    }
+  };
+  const handleMarkerPopupClose = (markerId: string) => {
+    ReactGA.event({ category: 'Marker', action: 'Popup Close', label: markerId });
+  };
+
   return (
     <AppContainer>
-      <InitialsInput
-        type="text"
-        placeholder="Display Initials"
-        value={userInitials}
-        onChange={handleInitialsChange}
-        maxLength={5}
-      />
-      <Notification isVisible={!!notification}>
-        {notification}
-      </Notification>
-      <MapWrapper>
-        <MapContainer {...mapProps}>
-          <TileLayer {...tileProps} />
-          {userLocation && (
-            <Marker
-              position={userLocation}
-              icon={createUserLocationIcon()}
-            />
-          )}
-          {markers
-            .filter(marker => !isMarkerExpired(marker.timestamp))
-            .map((marker) => {
-              const isOpen = openPopupId === marker.id;
-              return (
-                <Marker 
-                  key={marker.id}
-                  position={marker.position}
-                  icon={createCustomIcon(marker.created_by, marker.photo_url)}
-                  eventHandlers={{
-                    click: (e: { originalEvent: MouseEvent }) => {
-                      e.originalEvent.stopPropagation();
-                      console.log('Marker clicked:', marker.id);
-                      setOpenPopupId(marker.id);
-                    }
-                  }}
-                >
-                  {isOpen && (
-                    <StyledPopup
-                      closeButton={true}
-                      autoClose={false}
-                      closeOnClick={false}
-                      closeOnEscapeKey={false}
-                      maxWidth={220}
-                      minWidth={220}
-                      keepInView={true}
-                      className="custom-popup"
-                      eventHandlers={{
-                        remove: () => {
-                          console.log('Popup removed for marker:', marker.id);
-                          if (openPopupId === marker.id) {
-                            setOpenPopupId(null);
+      <BlurredWrapper blurred={!termsAccepted}>
+        <Notification isVisible={!!notification}>
+          {notification}
+        </Notification>
+        <MapWrapper>
+          <MapContainer {...mapProps}>
+            <TileLayer {...tileProps} />
+            {userLocation && (
+              <Marker
+                position={userLocation}
+                icon={createUserLocationIcon()}
+              />
+            )}
+            {markers
+              .filter(marker => !isMarkerExpired(marker.timestamp))
+              .map((marker) => {
+                const isOpen = openPopupId === marker.id;
+                return (
+                  <Marker 
+                    key={marker.id}
+                    position={marker.position}
+                    icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '')}
+                    eventHandlers={{
+                      click: (e: { originalEvent: MouseEvent }) => {
+                        e.originalEvent.stopPropagation();
+                        handleMarkerPopupOpen(marker.id);
+                      }
+                    }}
+                  >
+                    {isOpen && (
+                      <StyledPopup
+                        closeButton={true}
+                        autoClose={false}
+                        closeOnClick={false}
+                        closeOnEscapeKey={false}
+                        maxWidth={220}
+                        minWidth={220}
+                        keepInView={true}
+                        className="custom-popup"
+                        eventHandlers={{
+                          remove: () => {
+                            if (openPopupId === marker.id) {
+                              setOpenPopupId(null);
+                              handleMarkerPopupClose(marker.id);
+                            }
                           }
-                        }
-                      }}
-                    >
-                      <div 
-                        style={{ 
-                          pointerEvents: 'auto',
-                          position: 'relative',
-                          zIndex: 1000,
-                          backgroundColor: 'white',
-                          borderRadius: '8px',
-                          overflow: 'hidden'
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
                         }}
                       >
-                        <div style={{ position: 'relative' }}>
-                          <img 
-                            src={marker.photo_url} 
-                            alt="Captured photo" 
-                            style={{ 
-                              width: '100%', 
-                              height: '200px', 
-                              objectFit: 'cover',
-                              pointerEvents: 'none',
-                              display: 'block',
-                              borderTopLeftRadius: '8px',
-                              borderTopRightRadius: '8px'
-                            }}
-                          />
-                          <PhotoInfo>
-                            <TimeRemaining>
-                              {calculateTimeRemaining(marker.timestamp)}
-                            </TimeRemaining>
-                            <InteractionCounts>
-                              <Count type="like">
-                                👍 {marker.likes}
-                              </Count>
-                              <Count type="dislike">
-                                👎 {marker.dislikes}
-                              </Count>
-                            </InteractionCounts>
-                          </PhotoInfo>
+                        <div 
+                          style={{ 
+                            pointerEvents: 'auto',
+                            position: 'relative',
+                            zIndex: 1000,
+                            backgroundColor: 'white',
+                            borderRadius: '8px',
+                            overflow: 'hidden'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                          }}
+                        >
+                          <div style={{ position: 'relative' }}>
+                            {loadedPhotoUrls[marker.id] ? (
+                              <img 
+                                src={loadedPhotoUrls[marker.id]} 
+                                alt="Captured photo" 
+                                style={{ 
+                                  width: '100%', 
+                                  height: '200px', 
+                                  objectFit: 'cover',
+                                  pointerEvents: 'none',
+                                  display: 'block',
+                                  borderTopLeftRadius: '8px',
+                                  borderTopRightRadius: '8px'
+                                }}
+                              />
+                            ) : (
+                              <div style={{ 
+                                width: '100%', 
+                                height: '200px', 
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: '#f0f0f0',
+                                borderTopLeftRadius: '8px',
+                                borderTopRightRadius: '8px'
+                              }}>
+                                Loading...
+                              </div>
+                            )}
+                            <PhotoInfo>
+                              <TimeRemaining>
+                                {calculateTimeRemaining(marker.timestamp)}
+                              </TimeRemaining>
+                              <InteractionCounts>
+                                <Count type="like">
+                                  👍 {marker.likes}
+                                </Count>
+                                <Count type="dislike">
+                                  👎 {marker.dislikes}
+                                </Count>
+                              </InteractionCounts>
+                            </PhotoInfo>
+                          </div>
+                          <InteractionButtons>
+                            <InteractionButton 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDislike(marker.id);
+                              }}
+                              disabled={!!cardInteractions[marker.id] || userLikes <= userDislikes}
+                            >
+                              👎
+                            </InteractionButton>
+                            <InteractionButton 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleLike(marker.id);
+                              }}
+                              disabled={!!cardInteractions[marker.id]}
+                            >
+                              👍
+                            </InteractionButton>
+                          </InteractionButtons>
                         </div>
-                        <InteractionButtons>
-                          <InteractionButton 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDislike(marker.id);
-                            }}
-                            disabled={!!cardInteractions[marker.id] || userLikes <= userDislikes}
-                          >
-                            👎
-                          </InteractionButton>
-                          <InteractionButton 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleLike(marker.id);
-                            }}
-                            disabled={!!cardInteractions[marker.id]}
-                          >
-                            👍
-                          </InteractionButton>
-                        </InteractionButtons>
-                      </div>
-                    </StyledPopup>
-                  )}
-                </Marker>
-              );
-            })}
-        </MapContainer>
-      </MapWrapper>
-      <AddButton onClick={startCamera}>+</AddButton>
-      <CameraOverlay isVisible={isCameraOpen}>
-        <CameraPreview 
-          ref={videoRef} 
-          autoPlay 
-          playsInline 
-          muted
-          onLoadedMetadata={() => console.log('Video metadata loaded')}
-          onCanPlay={() => console.log('Video can play')}
-        />
-        <CameraControls>
-          <CameraButton 
-            onClick={() => {
-              console.log('Close button clicked');
-              stopCamera();
-            }}
-          >
-            ✕
-          </CameraButton>
-          <CameraButton 
-            onClick={() => {
-              console.log('Capture button clicked');
-              capturePhoto();
-            }}
-            disabled={isCapturing}
-          >
-            📸
-            <LoadingOverlay isVisible={isCapturing} />
-          </CameraButton>
-        </CameraControls>
-      </CameraOverlay>
+                      </StyledPopup>
+                    )}
+                  </Marker>
+                );
+              })}
+          </MapContainer>
+        </MapWrapper>
+        <CenteredAddButton onClick={startCamera}>+</CenteredAddButton>
+        <InitialsRow>
+          <AsText>as</AsText>
+          {editingInitials ? (
+            <InlineInput
+              type="text"
+              value={userInitials}
+              autoFocus
+              maxLength={5}
+              onChange={handleInitialsInputChange}
+              onBlur={handleInitialsInputBlur}
+              onKeyDown={handleInitialsInputKeyDown}
+            />
+          ) : (
+            <CreatedByLabel onClick={handleInitialsLabelClick} title="Click to edit your initials">
+              {userInitials}
+              <PencilIcon onClick={handleInitialsLabelClick} />
+            </CreatedByLabel>
+          )}
+        </InitialsRow>
+        <CameraOverlay isVisible={isCameraOpen}>
+          <CameraPreview 
+            ref={videoRef} 
+            autoPlay 
+            playsInline 
+            muted
+            onLoadedMetadata={() => {}}
+            onCanPlay={() => {}}
+          />
+          <CameraControls>
+            <CameraButton 
+              onClick={() => {
+                stopCamera();
+              }}
+            >
+              ✕
+            </CameraButton>
+            <CameraButton 
+              onClick={() => {
+                capturePhoto();
+              }}
+              disabled={isCapturing}
+            >
+              📸
+              <LoadingOverlay isVisible={isCapturing} />
+            </CameraButton>
+          </CameraControls>
+        </CameraOverlay>
+      </BlurredWrapper>
+      {!termsAccepted && (
+        <TermsAndConditions onAccept={handleTermsAccept} />
+      )}
     </AppContainer>
   );
 }
