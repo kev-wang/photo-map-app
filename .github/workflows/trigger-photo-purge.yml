@@ -1,0 +1,13 @@
+name: Trigger Daily Photo Purge
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # 4am ET = 8am UTC
+
+jobs:
+  call-edge-function:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Supabase Edge Function
+        run: |
+          curl -L -X POST 'https://ehajqagstgzdjjxgkwjc.supabase.co/functions/v1/delete-expired-photos' 
