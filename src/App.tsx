@@ -574,50 +574,51 @@ function App() {
     ReactGA.event({ category: 'Photo', action: 'Capture Photo' });
     if (isCapturing) return; // Prevent multiple clicks
     setIsCapturing(true);
-    if (!videoRef.current) {
-      showNotification('Error: Camera not initialized');
-      setIsCapturing(false);
-      return;
-    }
-    if (!videoRef.current.videoWidth || !videoRef.current.videoHeight) {
-      showNotification('Error: Camera not ready');
-      setIsCapturing(false);
-      return;
-    }
+    
     try {
+      if (!videoRef.current) {
+        throw new Error('Camera not initialized');
+      }
+      if (!videoRef.current.videoWidth || !videoRef.current.videoHeight) {
+        throw new Error('Camera not ready');
+      }
+
       // Capture full image
       const canvas = document.createElement('canvas');
       canvas.width = videoRef.current.videoWidth;
       canvas.height = videoRef.current.videoHeight;
       const context = canvas.getContext('2d');
       if (!context) {
-        showNotification('Error: Could not process photo');
-        setIsCapturing(false);
-        return;
+        throw new Error('Could not process photo');
       }
+
       context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const fullBlob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((blob) => { if (blob) resolve(blob); else reject(new Error('Could not create photo blob')); }, 'image/jpeg', 0.95);
       });
+
       // Generate thumbnail
       const thumbBlob = await generateThumbnail(fullBlob, 64);
+
       // Upload both to Supabase Storage
       const fileId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const { error: fullError } = await supabase.storage.from('photos').upload(`full/${fileId}.jpg`, fullBlob, { upsert: true });
       const { error: thumbError } = await supabase.storage.from('photos').upload(`thumb/${fileId}.jpg`, thumbBlob, { upsert: true });
+      
       if (fullError || thumbError) {
-        showNotification('Error uploading photo.');
-        setIsCapturing(false);
-        return;
+        throw new Error('Error uploading photo');
       }
+
       const { data: fullUrlData } = supabase.storage.from('photos').getPublicUrl(`full/${fileId}.jpg`);
       const { data: thumbUrlData } = supabase.storage.from('photos').getPublicUrl(`thumb/${fileId}.jpg`);
       const photoUrl = fullUrlData.publicUrl;
       const thumbnailUrl = thumbUrlData.publicUrl;
+
       // Get location
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000, maximumAge: 0, enableHighAccuracy: true });
       });
+
       const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
       const newMarker = {
         position: newPosition,
@@ -629,23 +630,23 @@ function App() {
         created_by: userInitials || 'Anonymous',
         last_interaction: Date.now()
       };
-      try {
-        const savedMarker = await database.addMarker(newMarker);
-        if (savedMarker) {
-          setMarkers(prev => [savedMarker, ...prev]);
-          if (mapRef.current) {
-            mapRef.current.setView(newPosition, mapRef.current.getZoom());
-          }
+
+      const savedMarker = await database.addMarker(newMarker);
+      if (savedMarker) {
+        setMarkers(prev => [savedMarker, ...prev]);
+        if (mapRef.current) {
+          mapRef.current.setView(newPosition, mapRef.current.getZoom());
         }
-        stopCamera();
-        showNotification('Photo added successfully!');
-      } catch (dbError) {
-        showNotification('Error saving photo to database. Please try again.');
       }
+
+      stopCamera();
+      showNotification('Photo added successfully!');
     } catch (error) {
-      showNotification('Error adding photo. Please try again.');
+      console.error('Error capturing photo:', error);
+      showNotification(error instanceof Error ? error.message : 'Error adding photo. Please try again.');
+      stopCamera();
     } finally {
-      setTimeout(() => { setIsCapturing(false); }, 2000);
+      setIsCapturing(false);
     }
   };
 

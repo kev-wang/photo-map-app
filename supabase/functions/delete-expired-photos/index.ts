@@ -16,14 +16,13 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 console.log("Hello from Functions!")
 
 Deno.serve(async (_req) => {
-  // 7 days in ms
   const BASE_LIFESPAN_MS = 7 * 24 * 60 * 60 * 1000;
   const now = Date.now();
 
-  // Fetch all markers
+  // 1. Fetch all markers
   const { data: markers, error: fetchError } = await supabase
     .from('photo_markers')
-    .select('*');
+    .select('id,photo_url,thumbnail_url,timestamp,likes,dislikes');
   if (fetchError) {
     return new Response(JSON.stringify({ error: fetchError.message }), { status: 500 })
   }
@@ -31,20 +30,37 @@ Deno.serve(async (_req) => {
     return new Response(JSON.stringify({ deleted: 0 }), { status: 200 })
   }
 
-  // Find expired marker IDs
-  const expiredIds = markers
-    .filter((marker) => {
-      const lifespanMs = BASE_LIFESPAN_MS + (marker.likes * BASE_LIFESPAN_MS) - (marker.dislikes * BASE_LIFESPAN_MS);
-      const expiryTime = marker.timestamp + lifespanMs;
-      return now > expiryTime;
-    })
-    .map((marker) => marker.id);
+  // 2. Find expired marker IDs
+  const expiredMarkers = markers.filter((marker) => {
+    const lifespanMs = BASE_LIFESPAN_MS + (marker.likes * BASE_LIFESPAN_MS) - (marker.dislikes * BASE_LIFESPAN_MS);
+    const expiryTime = marker.timestamp + lifespanMs;
+    return now > expiryTime;
+  });
 
-  if (expiredIds.length === 0) {
+  if (expiredMarkers.length === 0) {
     return new Response(JSON.stringify({ deleted: 0 }), { status: 200 })
   }
 
-  // Delete all expired markers
+  // 3. Delete files from Storage
+  for (const marker of expiredMarkers) {
+    // Remove full image
+    if (marker.photo_url && marker.photo_url.includes('/full/')) {
+      const fullPath = marker.photo_url.split('/full/')[1];
+      if (fullPath) {
+        await supabase.storage.from('photos').remove([`full/${fullPath}`]);
+      }
+    }
+    // Remove thumbnail
+    if (marker.thumbnail_url && marker.thumbnail_url.includes('/thumb/')) {
+      const thumbPath = marker.thumbnail_url.split('/thumb/')[1];
+      if (thumbPath) {
+        await supabase.storage.from('photos').remove([`thumb/${thumbPath}`]);
+      }
+    }
+  }
+
+  // 4. Delete all expired markers from DB
+  const expiredIds = expiredMarkers.map((marker) => marker.id);
   const { error: deleteError } = await supabase
     .from('photo_markers')
     .delete()
