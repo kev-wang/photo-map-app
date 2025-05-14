@@ -181,6 +181,9 @@ const StyledPopup = styled(Popup)`
     background: rgba(0, 0, 0, 0.3) !important;
     border-radius: 50%;
     margin: 5px;
+    position: absolute !important;
+    top: 30px !important;
+    right: 5px !important;
   }
 
   .leaflet-popup-tip-container {
@@ -293,10 +296,17 @@ const InlineInput = styled.input`
 `;
 
 const CenteredAddButton = styled(AddButton)`
-  position: absolute;
+  position: fixed;
   bottom: 100px;
   left: 50%;
   transform: translateX(-50%);
+  outline: none !important;
+  box-shadow: none !important;
+  &:focus,
+  &:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 4px #007AFF55 !important;
+  }
 `;
 
 const InitialsRow = styled.div`
@@ -318,8 +328,8 @@ const AsText = styled.span`
   color: #007AFF;
 `;
 
-// Add thumbnail_url to PhotoMarker type for correct typing
-type PhotoMarker = BasePhotoMarker & { thumbnail_url?: string };
+// Add thumbnail_url and views to PhotoMarker type for correct typing
+type PhotoMarker = BasePhotoMarker & { thumbnail_url?: string; views?: number };
 
 // Helper to generate a thumbnail from an image blob
 async function generateThumbnail(blob: Blob, maxSize = 64): Promise<Blob> {
@@ -385,6 +395,7 @@ function App() {
   const mapRef = useRef<L.Map | null>(null);
   const notificationTimeout = useRef<number | undefined>(undefined);
   const [isCapturing, setIsCapturing] = useState(false);
+  const markerRefs = useRef<Record<string, L.Marker>>({});
 
   // Track app load (pageview)
   useEffect(() => {
@@ -460,23 +471,39 @@ function App() {
 
   // Get user location with Singapore as fallback
   useEffect(() => {
+    let watchId: number | null = null;
     const getLocation = () => {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const newLocation: [number, number] = [position.coords.latitude, position.coords.longitude];
-          console.log('Setting user location:', newLocation);
-          setUserLocation(newLocation);
-        },
-        (error) => {
-          console.error('Error getting location:', error);
-          // Default to Singapore coordinates
-          setUserLocation([1.3521, 103.8198]);
-        },
-        { timeout: 5000, maximumAge: 0, enableHighAccuracy: true }
-      );
+      if (navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const newLocation: [number, number] = [position.coords.latitude, position.coords.longitude];
+            console.log('Updating user location:', newLocation);
+            setUserLocation(newLocation);
+          },
+          (error) => {
+            console.error('Error getting location:', error);
+            // Default to Singapore coordinates
+            setUserLocation([1.3521, 103.8198]);
+          },
+          {
+            enableHighAccuracy: false, // less battery
+            maximumAge: 60000, // accept cached positions up to 1 min old
+            timeout: 10000 // wait up to 10s for a fix
+          }
+        );
+      } else {
+        // Default to Singapore coordinates
+        setUserLocation([1.3521, 103.8198]);
+      }
     };
 
     getLocation();
+
+    return () => {
+      if (watchId !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
   }, []);
 
   // Save initials to localStorage
@@ -584,28 +611,32 @@ function App() {
       }
 
       // Capture full image
+      const originalWidth = videoRef.current.videoWidth;
+      const originalHeight = videoRef.current.videoHeight;
+      const targetWidth = 440;
+      const scale = targetWidth / originalWidth;
+      const targetHeight = Math.round(originalHeight * scale);
       const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
       const context = canvas.getContext('2d');
       if (!context) {
         throw new Error('Could not process photo');
       }
-
-      context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const fullBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => { if (blob) resolve(blob); else reject(new Error('Could not create photo blob')); }, 'image/jpeg', 0.95);
+      context.drawImage(videoRef.current, 0, 0, targetWidth, targetHeight);
+      const compressedBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => { if (blob) resolve(blob); else reject(new Error('Could not create photo blob')); }, 'image/jpeg', 0.7);
       });
 
       // Generate thumbnail
-      const thumbBlob = await generateThumbnail(fullBlob, 64);
+      const thumbBlob = await generateThumbnail(compressedBlob, 64);
 
-      // Upload both to Supabase Storage
+      // Upload only the compressed image and thumbnail to Supabase Storage
       const fileId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const { error: fullError } = await supabase.storage.from('photos').upload(`full/${fileId}.jpg`, fullBlob, { upsert: true });
+      const { error: photoError } = await supabase.storage.from('photos').upload(`full/${fileId}.jpg`, compressedBlob, { upsert: true });
       const { error: thumbError } = await supabase.storage.from('photos').upload(`thumb/${fileId}.jpg`, thumbBlob, { upsert: true });
       
-      if (fullError || thumbError) {
+      if (photoError || thumbError) {
         throw new Error('Error uploading photo');
       }
 
@@ -911,12 +942,14 @@ function App() {
 
   // Example: Track marker popup open/close
   const handleMarkerPopupOpen = async (markerId: string) => {
+    console.log('Opening popup for marker:', markerId);
     ReactGA.event({ category: 'Photo', action: 'Open Popup', label: markerId });
     setOpenPopupId(markerId);
     
     // Load the full photo URL if not already loaded
     if (!loadedPhotoUrls[markerId]) {
       try {
+        console.log('Loading full photo URL for marker:', markerId);
         const photoUrl = await database.getPhotoUrl(markerId);
         setLoadedPhotoUrls(prev => ({
           ...prev,
@@ -927,10 +960,26 @@ function App() {
         showNotification('Error loading photo');
       }
     }
+
+    // Increment views using the atomic RPC function
+    try {
+      console.log('Attempting to increment views for marker:', markerId);
+      const newViews = await database.incrementViews(markerId);
+      console.log('Successfully updated views in state:', newViews);
+      setMarkers(prev => prev.map(m => m.id === markerId ? { ...m, views: newViews } : m));
+    } catch (error) {
+      console.error('Error incrementing views:', error);
+    }
   };
   const handleMarkerPopupClose = (markerId: string) => {
     ReactGA.event({ category: 'Marker', action: 'Popup Close', label: markerId });
   };
+
+  useEffect(() => {
+    if (openPopupId && markerRefs.current[openPopupId]) {
+      markerRefs.current[openPopupId].openPopup();
+    }
+  }, [openPopupId]);
 
   return (
     <AppContainer>
@@ -956,6 +1005,13 @@ function App() {
                     key={marker.id}
                     position={marker.position}
                     icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '')}
+                    ref={(ref: L.Marker | null) => {
+                      if (ref) {
+                        markerRefs.current[marker.id] = ref;
+                      } else {
+                        delete markerRefs.current[marker.id];
+                      }
+                    }}
                     eventHandlers={{
                       click: (e: { originalEvent: MouseEvent }) => {
                         e.originalEvent.stopPropagation();
@@ -996,6 +1052,26 @@ function App() {
                             e.preventDefault();
                           }}
                         >
+                          <PhotoInfo style={{ position: 'static', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span role="img" aria-label="hourglass">⏳</span>
+                              <TimeRemaining>{calculateTimeRemaining(marker.timestamp)}</TimeRemaining>
+                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span role="img" aria-label="views">👁️</span>
+                                <span>{marker.views ?? 0}</span>
+                              </span>
+                              <InteractionCounts>
+                                <Count type="like">
+                                  👍 {marker.likes}
+                                </Count>
+                                <Count type="dislike">
+                                  👎 {marker.dislikes}
+                                </Count>
+                              </InteractionCounts>
+                            </span>
+                          </PhotoInfo>
                           <div style={{ position: 'relative' }}>
                             {loadedPhotoUrls[marker.id] ? (
                               <img 
@@ -1007,8 +1083,8 @@ function App() {
                                   objectFit: 'cover',
                                   pointerEvents: 'none',
                                   display: 'block',
-                                  borderTopLeftRadius: '8px',
-                                  borderTopRightRadius: '8px'
+                                  borderTopLeftRadius: '0',
+                                  borderTopRightRadius: '0'
                                 }}
                               />
                             ) : (
@@ -1019,25 +1095,12 @@ function App() {
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 backgroundColor: '#f0f0f0',
-                                borderTopLeftRadius: '8px',
-                                borderTopRightRadius: '8px'
+                                borderTopLeftRadius: '0',
+                                borderTopRightRadius: '0'
                               }}>
                                 Loading...
                               </div>
                             )}
-                            <PhotoInfo>
-                              <TimeRemaining>
-                                {calculateTimeRemaining(marker.timestamp)}
-                              </TimeRemaining>
-                              <InteractionCounts>
-                                <Count type="like">
-                                  👍 {marker.likes}
-                                </Count>
-                                <Count type="dislike">
-                                  👎 {marker.dislikes}
-                                </Count>
-                              </InteractionCounts>
-                            </PhotoInfo>
                           </div>
                           <InteractionButtons>
                             <InteractionButton 

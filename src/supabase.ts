@@ -38,6 +38,7 @@ export interface PhotoMarker {
   created_by: string;
   last_interaction: number;
   thumbnail_url?: string;
+  views?: number;
 }
 
 export const database = {
@@ -46,7 +47,7 @@ export const database = {
     console.log('Executing getMarkers query...');
     const { data, error } = await supabase
       .from('photo_markers')
-      .select('id,position,created_by,timestamp,likes,dislikes,last_interaction,thumbnail_url')
+      .select('id,position,created_by,timestamp,likes,dislikes,last_interaction,thumbnail_url,views')
       .order('timestamp', { ascending: false })
       .limit(100); // Limit to 100 markers to prevent overloading
 
@@ -153,5 +154,19 @@ export const database = {
     });
 
     return channel;
+  },
+
+  // Increment views for a marker using the atomic RPC function
+  incrementViews: async (markerId: string) => {
+    console.log('Incrementing views for marker:', markerId);
+    const { data, error } = await supabase
+      .rpc('increment_photo_marker_views', { marker_id: markerId });
+
+    if (error) {
+      console.error('Error in increment_photo_marker_views RPC:', error);
+      throw error;
+    }
+    console.log('Views incremented successfully. New count:', data);
+    return data;
   }
 }; 
