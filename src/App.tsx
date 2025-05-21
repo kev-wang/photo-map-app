@@ -1,17 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import type { MapContainerProps, TileLayerProps } from 'react-leaflet';
-import styled from '@emotion/styled';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { database, PhotoMarker as BasePhotoMarker, testSupabaseConnection, supabase } from './supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { TermsAndConditions } from './TermsAndConditions';
 import ReactGA from 'react-ga4';
-import { FaPencilAlt } from 'react-icons/fa';
+import { FaPencilAlt, FaQuestionCircle } from 'react-icons/fa';
+import styled from '@emotion/styled';
 
 // Initialize Google Analytics with the provided Measurement ID
-ReactGA.initialize('G-Z47SXMLQPL');
+ReactGA.initialize('G-Z47SXMLQPL', {
+  gaOptions: {
+    cookieDomain: 'auto',
+    cookieFlags: 'SameSite=None;Secure'
+  }
+});
 
 // Fix for default marker icons in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -307,12 +312,15 @@ const CenteredAddButton = styled(AddButton)`
     outline: none !important;
     box-shadow: 0 0 0 4px #007AFF55 !important;
   }
+  &:active {
+    transform: translateX(-50%) scale(0.95);
+  }
 `;
 
 const InitialsRow = styled.div`
   position: absolute;
   bottom: 100px;
-  left: calc(50% + 50px);
+  left: calc(50% + 40px);
   display: flex;
   align-items: center;
   z-index: 1000;
@@ -322,10 +330,11 @@ const InitialsRow = styled.div`
 `;
 
 const AsText = styled.span`
-  margin-left: 16px;
+  margin-left: 4px;
   font-size: 12px;
   font-weight: bold;
   color: #007AFF;
+  white-space: nowrap;
 `;
 
 // Add thumbnail_url and views to PhotoMarker type for correct typing
@@ -375,6 +384,93 @@ async function generateThumbnail(blob: Blob, maxSize = 64): Promise<Blob> {
   });
 }
 
+// Add styled component for the help button
+const HelpButton = styled.button`
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 2001;
+  background: none;
+  border: none;
+  color: #007AFF;
+  font-size: 2rem;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+// Modal overlay and content reuse from TermsAndConditions
+const ModalOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 3000;
+`;
+const ModalContent = styled.div`
+  background: white;
+  padding: 0;
+  border-radius: 8px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+`;
+const HeaderBanner = styled.div`
+  background-color: #007AFF;
+  color: white;
+  padding: 1rem;
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 700;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+`;
+const RulesTitle = styled.h2`
+  color: #333;
+  margin: 1rem 2rem;
+  font-size: 1.3rem;
+`;
+const RulesText = styled.div`
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #444;
+  padding: 0 2rem 1rem 2rem;
+  overflow-y: auto;
+  max-height: calc(80vh - 200px);
+  ul {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+  }
+`;
+const CloseButton = styled.button`
+  padding: 0.5rem 1.5rem;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.9rem;
+  background-color: #007AFF;
+  color: white;
+  margin: 1rem 2rem 1.5rem auto;
+  transition: background 0.2s;
+  &:hover {
+    background-color: #005bb5;
+  }
+`;
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
@@ -396,6 +492,7 @@ function App() {
   const notificationTimeout = useRef<number | undefined>(undefined);
   const [isCapturing, setIsCapturing] = useState(false);
   const markerRefs = useRef<Record<string, L.Marker>>({});
+  const [showRules, setShowRules] = useState(false);
 
   // Track app load (pageview)
   useEffect(() => {
@@ -479,6 +576,10 @@ function App() {
             const newLocation: [number, number] = [position.coords.latitude, position.coords.longitude];
             console.log('Updating user location:', newLocation);
             setUserLocation(newLocation);
+            // Center map on user location
+            if (mapRef.current) {
+              mapRef.current.setView(newLocation, mapRef.current.getZoom() || 13);
+            }
           },
           (error) => {
             console.error('Error getting location:', error);
@@ -616,11 +717,11 @@ function App() {
       const targetWidth = 440;
       const scale = targetWidth / originalWidth;
       const targetHeight = Math.round(originalHeight * scale);
-      const canvas = document.createElement('canvas');
+    const canvas = document.createElement('canvas');
       canvas.width = targetWidth;
       canvas.height = targetHeight;
-      const context = canvas.getContext('2d');
-      if (!context) {
+    const context = canvas.getContext('2d');
+    if (!context) {
         throw new Error('Could not process photo');
       }
       context.drawImage(videoRef.current, 0, 0, targetWidth, targetHeight);
@@ -983,13 +1084,16 @@ function App() {
 
   return (
     <AppContainer>
+      <HelpButton onClick={() => setShowRules(true)} title="Show Rules">
+        <FaQuestionCircle />
+      </HelpButton>
       <BlurredWrapper blurred={!termsAccepted}>
-        <Notification isVisible={!!notification}>
-          {notification}
-        </Notification>
-        <MapWrapper>
-          <MapContainer {...mapProps}>
-            <TileLayer {...tileProps} />
+      <Notification isVisible={!!notification}>
+        {notification}
+      </Notification>
+      <MapWrapper>
+        <MapContainer {...mapProps}>
+          <TileLayer {...tileProps} />
             {userLocation && (
               <Marker
                 position={userLocation}
@@ -1000,10 +1104,10 @@ function App() {
               .filter(marker => !isMarkerExpired(marker.timestamp))
               .map((marker) => {
                 const isOpen = openPopupId === marker.id;
-                return (
-                  <Marker 
-                    key={marker.id}
-                    position={marker.position}
+            return (
+              <Marker 
+                key={marker.id} 
+                position={marker.position}
                     icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '')}
                     ref={(ref: L.Marker | null) => {
                       if (ref) {
@@ -1076,7 +1180,7 @@ function App() {
                             {loadedPhotoUrls[marker.id] ? (
                               <img 
                                 src={loadedPhotoUrls[marker.id]} 
-                                alt="Captured photo" 
+                    alt="Captured photo" 
                                 style={{ 
                                   width: '100%', 
                                   height: '200px', 
@@ -1086,7 +1190,7 @@ function App() {
                                   borderTopLeftRadius: '0',
                                   borderTopRightRadius: '0'
                                 }}
-                              />
+                  />
                             ) : (
                               <div style={{ 
                                 width: '100%', 
@@ -1122,17 +1226,17 @@ function App() {
                               👍
                             </InteractionButton>
                           </InteractionButtons>
-                        </div>
-                      </StyledPopup>
+                  </div>
+                </StyledPopup>
                     )}
-                  </Marker>
-                );
-              })}
-          </MapContainer>
-        </MapWrapper>
+              </Marker>
+            );
+          })}
+        </MapContainer>
+      </MapWrapper>
         <CenteredAddButton onClick={startCamera}>+</CenteredAddButton>
         <InitialsRow>
-          <AsText>as</AsText>
+          <AsText>post as</AsText>
           {editingInitials ? (
             <InlineInput
               type="text"
@@ -1150,16 +1254,16 @@ function App() {
             </CreatedByLabel>
           )}
         </InitialsRow>
-        <CameraOverlay isVisible={isCameraOpen}>
-          <CameraPreview 
-            ref={videoRef} 
-            autoPlay 
-            playsInline 
-            muted
+      <CameraOverlay isVisible={isCameraOpen}>
+        <CameraPreview 
+          ref={videoRef} 
+          autoPlay 
+          playsInline 
+          muted
             onLoadedMetadata={() => {}}
             onCanPlay={() => {}}
-          />
-          <CameraControls>
+        />
+        <CameraControls>
             <CameraButton 
               onClick={() => {
                 stopCamera();
@@ -1176,11 +1280,27 @@ function App() {
               📸
               <LoadingOverlay isVisible={isCapturing} />
             </CameraButton>
-          </CameraControls>
-        </CameraOverlay>
+        </CameraControls>
+      </CameraOverlay>
       </BlurredWrapper>
       {!termsAccepted && (
         <TermsAndConditions onAccept={handleTermsAccept} />
+      )}
+      {showRules && (
+        <ModalOverlay>
+          <ModalContent>
+            <HeaderBanner>Welcome to Fading Photos</HeaderBanner>
+            <RulesTitle>Rules</RulesTitle>
+            <RulesText>
+              <ul>
+                <li>Every photo posted have 7 days of life ⏳ by default, when life runs out photo will fade from the map</li>
+                <li>Every "like" 👍 will extend photo's life by 7 days, every "dislike" 👎 will reduce photo's life by 7 days</li>
+                <li>You must "like" a photo in order to "dislike" another photo</li>
+              </ul>
+            </RulesText>
+            <CloseButton onClick={() => setShowRules(false)}>Close</CloseButton>
+          </ModalContent>
+        </ModalOverlay>
       )}
     </AppContainer>
   );

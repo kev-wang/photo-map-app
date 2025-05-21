@@ -1,0 +1,12 @@
+# robots.txt for fadingphotos.com
+User-agent: *
+Allow: /
+Allow: /terms
+Allow: /privacy
+
+# Disallow admin or private routes if you add them later
+Disallow: /admin/
+Disallow: /api/
+
+# Sitemap location
+Sitemap: https://fadingphotos.com/sitemap.xml 
