@@ -438,11 +438,6 @@ const HeaderBanner = styled.div`
   border-top-left-radius: 8px;
   border-top-right-radius: 8px;
 `;
-const RulesTitle = styled.h2`
-  color: #333;
-  margin: 1rem 2rem;
-  font-size: 1.3rem;
-`;
 const RulesText = styled.div`
   font-size: 0.95rem;
   line-height: 1.5;
@@ -569,6 +564,8 @@ function App() {
   // Get user location with Singapore as fallback
   useEffect(() => {
     let watchId: number | null = null;
+    let isFirstLocation = true;  // Flag to track if this is the first location update
+
     const getLocation = () => {
       if (navigator.geolocation) {
         watchId = navigator.geolocation.watchPosition(
@@ -576,9 +573,12 @@ function App() {
             const newLocation: [number, number] = [position.coords.latitude, position.coords.longitude];
             console.log('Updating user location:', newLocation);
             setUserLocation(newLocation);
-            // Center map on user location
-            if (mapRef.current) {
+            
+            // Only center the map on the first location update
+            if (isFirstLocation && mapRef.current) {
+              console.log('Centering map on initial location');
               mapRef.current.setView(newLocation, mapRef.current.getZoom() || 13);
+              isFirstLocation = false;
             }
           },
           (error) => {
@@ -1289,8 +1289,7 @@ function App() {
       {showRules && (
         <ModalOverlay>
           <ModalContent>
-            <HeaderBanner>Welcome to Fading Photos</HeaderBanner>
-            <RulesTitle>Rules</RulesTitle>
+            <HeaderBanner>Rules</HeaderBanner>
             <RulesText>
               <ul>
                 <li>Every photo posted have 7 days of life ⏳ by default, when life runs out photo will fade from the map</li>
