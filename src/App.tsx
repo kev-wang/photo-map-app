@@ -11,7 +11,7 @@ import { FaPencilAlt, FaQuestionCircle } from 'react-icons/fa';
 import styled from '@emotion/styled';
 
 // Initialize Google Analytics with the provided Measurement ID
-ReactGA.initialize('G-Z47SXMLQPL', {
+ReactGA.initialize(import.meta.env.VITE_GA_MEASUREMENT_ID || '', {
   gaOptions: {
     cookieDomain: 'auto',
     cookieFlags: 'SameSite=None;Secure'
@@ -496,21 +496,15 @@ function App() {
 
   // Function to load markers
   const loadMarkers = async () => {
-    console.log('Starting to load markers...');
     try {
-      console.log('Attempting to fetch markers from database...');
       const data = await database.getMarkers();
-      console.log('Database response:', data);
       if (data) {
-        console.log('Number of markers loaded:', data.length);
-        console.log('Markers data:', JSON.stringify(data, null, 2));
         setMarkers(data);
       } else {
-        console.log('No markers data received from database');
         setMarkers([]);
       }
     } catch (error) {
-      console.error('Error loading markers:', error);
+      console.error('Error loading markers');
       setMarkers([]);
     }
   };
@@ -564,36 +558,31 @@ function App() {
   // Get user location with Singapore as fallback
   useEffect(() => {
     let watchId: number | null = null;
-    let isFirstLocation = true;  // Flag to track if this is the first location update
+    let isFirstLocation = true;
 
     const getLocation = () => {
       if (navigator.geolocation) {
         watchId = navigator.geolocation.watchPosition(
           (position) => {
             const newLocation: [number, number] = [position.coords.latitude, position.coords.longitude];
-            console.log('Updating user location:', newLocation);
             setUserLocation(newLocation);
             
-            // Only center the map on the first location update
             if (isFirstLocation && mapRef.current) {
-              console.log('Centering map on initial location');
               mapRef.current.setView(newLocation, mapRef.current.getZoom() || 13);
               isFirstLocation = false;
             }
           },
-          (error) => {
-            console.error('Error getting location:', error);
-            // Default to Singapore coordinates
+          () => {
+            console.error('Error getting location');
             setUserLocation([1.3521, 103.8198]);
           },
           {
-            enableHighAccuracy: false, // less battery
-            maximumAge: 60000, // accept cached positions up to 1 min old
-            timeout: 10000 // wait up to 10s for a fix
+            enableHighAccuracy: false,
+            maximumAge: 60000,
+            timeout: 10000
           }
         );
       } else {
-        // Default to Singapore coordinates
         setUserLocation([1.3521, 103.8198]);
       }
     };
@@ -1043,33 +1032,27 @@ function App() {
 
   // Example: Track marker popup open/close
   const handleMarkerPopupOpen = async (markerId: string) => {
-    console.log('Opening popup for marker:', markerId);
     ReactGA.event({ category: 'Photo', action: 'Open Popup', label: markerId });
     setOpenPopupId(markerId);
     
-    // Load the full photo URL if not already loaded
     if (!loadedPhotoUrls[markerId]) {
       try {
-        console.log('Loading full photo URL for marker:', markerId);
         const photoUrl = await database.getPhotoUrl(markerId);
         setLoadedPhotoUrls(prev => ({
           ...prev,
           [markerId]: photoUrl
         }));
       } catch (error) {
-        console.error('Error loading photo URL:', error);
+        console.error('Error loading photo');
         showNotification('Error loading photo');
       }
     }
 
-    // Increment views using the atomic RPC function
     try {
-      console.log('Attempting to increment views for marker:', markerId);
       const newViews = await database.incrementViews(markerId);
-      console.log('Successfully updated views in state:', newViews);
       setMarkers(prev => prev.map(m => m.id === markerId ? { ...m, views: newViews } : m));
     } catch (error) {
-      console.error('Error incrementing views:', error);
+      console.error('Error updating views');
     }
   };
   const handleMarkerPopupClose = (markerId: string) => {

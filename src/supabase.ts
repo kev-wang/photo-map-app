@@ -6,26 +6,26 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase credentials:', { supabaseUrl, supabaseAnonKey });
+  console.error('Missing Supabase credentials');
+  throw new Error('Missing Supabase credentials');
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  realtime: {
-    params: {
-      eventsPerSecond: 10
-    }
+  auth: {
+    persistSession: false
   }
 });
 
 // Test the connection
 export const testSupabaseConnection = async () => {
-  const { error } = await supabase.from('photo_markers').select('count');
-  if (error) {
-    console.error('Supabase connection error:', error);
+  try {
+    const { error } = await supabase.from('photo_markers').select('count').limit(1);
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error('Supabase connection error');
     return false;
   }
-  console.log('Supabase connected successfully');
-  return true;
 };
 
 export interface PhotoMarker {
