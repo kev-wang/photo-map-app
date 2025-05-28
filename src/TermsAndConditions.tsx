@@ -200,9 +200,9 @@ export const TermsAndConditions: React.FC<TermsAndConditionsProps> = ({ onAccept
         </TermsText>
         
         <ButtonContainer>
-          <Button className="decline" onClick={handleDecline}>
+          {/* <Button className="decline" onClick={handleDecline}>
             Decline
-          </Button>
+          </Button> */}
           <Button className="accept" onClick={handleAccept}>
             Accept
           </Button>

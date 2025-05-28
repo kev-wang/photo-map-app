@@ -909,6 +909,7 @@ function App() {
   };
 
   const createCustomIcon = (initials: string, thumbnailUrl: string) => {
+    const currentZoom = mapRef.current?.getZoom() ?? 0;
     const divIcon = L.divIcon({
       className: 'custom-marker',
       html: `
@@ -959,6 +960,7 @@ function App() {
             padding: 2px 6px;
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: ${currentZoom >= 15 ? 'block' : 'none'};
           ">${initials}</div>
         </div>
       `,
@@ -968,6 +970,22 @@ function App() {
     });
     return divIcon;
   };
+
+  // Add zoom change handler
+  useEffect(() => {
+    if (mapRef.current) {
+      mapRef.current.on('zoomend', () => {
+        // Force marker icons to update when zoom changes
+        markers.forEach(marker => {
+          if (markerRefs.current[marker.id]) {
+            markerRefs.current[marker.id].setIcon(
+              createCustomIcon(marker.created_by, marker.thumbnail_url || '')
+            );
+          }
+        });
+      });
+    }
+  }, [markers]);
 
   const createUserLocationIcon = () => {
     return L.divIcon({
@@ -1033,7 +1051,6 @@ function App() {
   // Example: Track marker popup open/close
   const handleMarkerPopupOpen = async (markerId: string) => {
     ReactGA.event({ category: 'Photo', action: 'Open Popup', label: markerId });
-    setOpenPopupId(markerId);
     
     if (!loadedPhotoUrls[markerId]) {
       try {
@@ -1054,6 +1071,8 @@ function App() {
     } catch (error) {
       console.error('Error updating views');
     }
+    
+    setOpenPopupId(markerId);
   };
   const handleMarkerPopupClose = (markerId: string) => {
     ReactGA.event({ category: 'Marker', action: 'Popup Close', label: markerId });
@@ -1086,135 +1105,132 @@ function App() {
             {markers
               .filter(marker => !isMarkerExpired(marker.timestamp))
               .map((marker) => {
-                const isOpen = openPopupId === marker.id;
-            return (
-              <Marker 
-                key={marker.id} 
-                position={marker.position}
+                return (
+                  <Marker 
+                    key={marker.id} 
+                    position={marker.position}
                     icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '')}
                     ref={(ref: L.Marker | null) => {
                       if (ref) {
                         markerRefs.current[marker.id] = ref;
-                      } else {
-                        delete markerRefs.current[marker.id];
                       }
                     }}
                     eventHandlers={{
-                      click: (e: { originalEvent: MouseEvent }) => {
-                        e.originalEvent.stopPropagation();
+                      click: () => {
+                        // Close all other popups first
+                        Object.keys(markerRefs.current).forEach((id) => {
+                          if (id !== marker.id && markerRefs.current[id]) {
+                            markerRefs.current[id].closePopup();
+                          }
+                        });
                         handleMarkerPopupOpen(marker.id);
                       }
                     }}
                   >
-                    {isOpen && (
-                      <StyledPopup
-                        closeButton={true}
-                        autoClose={false}
-                        closeOnClick={false}
-                        closeOnEscapeKey={false}
-                        maxWidth={220}
-                        minWidth={220}
-                        keepInView={true}
-                        className="custom-popup"
-                        eventHandlers={{
-                          remove: () => {
-                            if (openPopupId === marker.id) {
-                              setOpenPopupId(null);
-                              handleMarkerPopupClose(marker.id);
-                            }
-                          }
+                    <StyledPopup
+                      closeButton={true}
+                      autoClose={false}
+                      closeOnClick={false}
+                      closeOnEscapeKey={false}
+                      maxWidth={220}
+                      minWidth={220}
+                      keepInView={true}
+                      className="custom-popup"
+                      eventHandlers={{
+                        remove: () => {
+                          handleMarkerPopupClose(marker.id);
+                        }
+                      }}
+                    >
+                      <div 
+                        style={{ 
+                          pointerEvents: 'auto',
+                          position: 'relative',
+                          zIndex: 1000,
+                          backgroundColor: 'white',
+                          borderRadius: '8px',
+                          overflow: 'hidden'
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
                         }}
                       >
-                        <div 
-                          style={{ 
-                            pointerEvents: 'auto',
-                            position: 'relative',
-                            zIndex: 1000,
-                            backgroundColor: 'white',
-                            borderRadius: '8px',
-                            overflow: 'hidden'
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                          }}
-                        >
-                          <PhotoInfo style={{ position: 'static', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
+                        <PhotoInfo style={{ position: 'static', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span role="img" aria-label="hourglass">⏳</span>
+                            <TimeRemaining>{calculateTimeRemaining(marker.timestamp)}</TimeRemaining>
+                          </span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <span role="img" aria-label="hourglass">⏳</span>
-                              <TimeRemaining>{calculateTimeRemaining(marker.timestamp)}</TimeRemaining>
+                              <span role="img" aria-label="views">👁️</span>
+                              <span>{marker.views ?? 0}</span>
                             </span>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <span role="img" aria-label="views">👁️</span>
-                                <span>{marker.views ?? 0}</span>
-                              </span>
-                              <InteractionCounts>
-                                <Count type="like">
-                                  👍 {marker.likes}
-                                </Count>
-                                <Count type="dislike">
-                                  👎 {marker.dislikes}
-                                </Count>
-                              </InteractionCounts>
-                            </span>
-                          </PhotoInfo>
-                          <div style={{ position: 'relative' }}>
-                            {loadedPhotoUrls[marker.id] ? (
-                              <img 
-                                src={loadedPhotoUrls[marker.id]} 
-                    alt="Captured photo" 
-                                style={{ 
-                                  width: '100%', 
-                                  height: '200px', 
-                                  objectFit: 'cover',
-                                  pointerEvents: 'none',
-                                  display: 'block',
-                                  borderTopLeftRadius: '0',
-                                  borderTopRightRadius: '0'
-                                }}
-                  />
-                            ) : (
-                              <div style={{ 
+                            <InteractionCounts>
+                              <Count type="like">
+                                👍 {marker.likes}
+                              </Count>
+                              <Count type="dislike">
+                                👎 {marker.dislikes}
+                              </Count>
+                            </InteractionCounts>
+                          </span>
+                        </PhotoInfo>
+                        <div style={{ position: 'relative' }}>
+                          {loadedPhotoUrls[marker.id] ? (
+                            <img 
+                              src={loadedPhotoUrls[marker.id]} 
+                              alt="Captured photo" 
+                              style={{ 
                                 width: '100%', 
                                 height: '200px', 
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                backgroundColor: '#f0f0f0',
+                                objectFit: 'cover',
+                                pointerEvents: 'none',
+                                display: 'block',
                                 borderTopLeftRadius: '0',
                                 borderTopRightRadius: '0'
-                              }}>
-                                Loading...
-                              </div>
-                            )}
-                          </div>
-                          <InteractionButtons>
-                            <InteractionButton 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDislike(marker.id);
                               }}
-                              disabled={!!cardInteractions[marker.id] || userLikes <= userDislikes}
-                            >
-                              👎
-                            </InteractionButton>
-                            <InteractionButton 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleLike(marker.id);
-                              }}
-                              disabled={!!cardInteractions[marker.id]}
-                            >
-                              👍
-                            </InteractionButton>
-                          </InteractionButtons>
-                  </div>
-                </StyledPopup>
-                    )}
-              </Marker>
-            );
-          })}
+                            />
+                          ) : (
+                            <div style={{ 
+                              width: '100%', 
+                              height: '200px', 
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              backgroundColor: '#f0f0f0',
+                              borderTopLeftRadius: '0',
+                              borderTopRightRadius: '0'
+                            }}>
+                              Loading...
+                            </div>
+                          )}
+                        </div>
+                        <InteractionButtons>
+                          <InteractionButton 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDislike(marker.id);
+                            }}
+                            disabled={!!cardInteractions[marker.id] || userLikes <= userDislikes}
+                          >
+                            👎
+                          </InteractionButton>
+                          <InteractionButton 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleLike(marker.id);
+                            }}
+                            disabled={!!cardInteractions[marker.id]}
+                          >
+                            👍
+                          </InteractionButton>
+                        </InteractionButtons>
+                      </div>
+                    </StyledPopup>
+                  </Marker>
+                );
+              })}
         </MapContainer>
       </MapWrapper>
         <CenteredAddButton onClick={startCamera}>+</CenteredAddButton>
