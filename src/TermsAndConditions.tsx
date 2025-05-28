@@ -151,10 +151,6 @@ export const TermsAndConditions: React.FC<TermsAndConditionsProps> = ({ onAccept
     }, 300); // Match this with the CSS transition duration
   };
 
-  const handleDecline = () => {
-    window.location.href = 'https://www.google.com';
-  };
-
   if (hasAccepted) {
     return null;
   }
@@ -200,9 +196,6 @@ export const TermsAndConditions: React.FC<TermsAndConditionsProps> = ({ onAccept
         </TermsText>
         
         <ButtonContainer>
-          {/* <Button className="decline" onClick={handleDecline}>
-            Decline
-          </Button> */}
           <Button className="accept" onClick={handleAccept}>
             Accept
           </Button>
