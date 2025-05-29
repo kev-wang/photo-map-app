@@ -39,6 +39,7 @@ export interface PhotoMarker {
   last_interaction: number;
   thumbnail_url?: string;
   views?: number;
+  created_at?: string;
 }
 
 export const database = {
@@ -47,7 +48,7 @@ export const database = {
     console.log('Executing getMarkers query...');
     const { data, error } = await supabase
       .from('photo_markers')
-      .select('id,position,created_by,timestamp,likes,dislikes,last_interaction,thumbnail_url,views')
+      .select('id,position,created_by,timestamp,likes,dislikes,last_interaction,thumbnail_url,views,created_at')
       .order('timestamp', { ascending: false })
       .limit(100); // Limit to 100 markers to prevent overloading
 

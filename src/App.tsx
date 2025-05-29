@@ -466,6 +466,21 @@ const CloseButton = styled.button`
   }
 `;
 
+// Add this styled component for the date overlay
+const DateOverlay = styled.div`
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  z-index: 2;
+  pointer-events: none;
+`;
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
@@ -908,9 +923,12 @@ function App() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
   };
 
-  const createCustomIcon = (initials: string, thumbnailUrl: string) => {
+  const createCustomIcon = (initials: string, thumbnailUrl: string, timeRemainingHours?: number) => {
     const currentZoom = mapRef.current?.getZoom() ?? 0;
-    const divIcon = L.divIcon({
+    // Determine if we should show the fade soon label
+    const showFadeSoon = typeof timeRemainingHours === 'number' && timeRemainingHours <= 3 && currentZoom >= 15;
+    const showCreatorLabel = currentZoom >= 15;
+    return L.divIcon({
       className: 'custom-marker',
       html: `
         <div style="
@@ -922,6 +940,24 @@ function App() {
           background-repeat: no-repeat;
           background-position: center;
         ">
+          ${showFadeSoon ? `<div style="
+            position: absolute;
+            top: -32px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ff9800;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            z-index: 1001;
+            pointer-events: none;
+            background: rgba(255, 255, 255, 0.4);
+            padding: 2px 6px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: block;">
+            &lt;3 hrs till I fade
+          </div>` : ''}
           <div style="
             position: absolute;
             top: calc(50% - 9px);
@@ -956,11 +992,11 @@ function App() {
             white-space: nowrap;
             z-index: 1000;
             pointer-events: none;
-            background: rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.4);
             padding: 2px 6px;
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            display: ${currentZoom >= 15 ? 'block' : 'none'};
+            display: ${showCreatorLabel ? 'block' : 'none'};
           ">${initials}</div>
         </div>
       `,
@@ -968,7 +1004,6 @@ function App() {
       iconAnchor: [20, 56],
       popupAnchor: [0, -56]
     });
-    return divIcon;
   };
 
   // Add zoom change handler
@@ -978,8 +1013,10 @@ function App() {
         // Force marker icons to update when zoom changes
         markers.forEach(marker => {
           if (markerRefs.current[marker.id]) {
+            const now = Date.now();
+            const hoursRemaining = LIFETIME_HOURS - ((now - marker.timestamp) / (1000 * 60 * 60));
             markerRefs.current[marker.id].setIcon(
-              createCustomIcon(marker.created_by, marker.thumbnail_url || '')
+              createCustomIcon(marker.created_by, marker.thumbnail_url || '', hoursRemaining)
             );
           }
         });
@@ -1105,11 +1142,14 @@ function App() {
             {markers
               .filter(marker => !isMarkerExpired(marker.timestamp))
               .map((marker) => {
+                // Calculate hours remaining for this marker
+                const now = Date.now();
+                const hoursRemaining = LIFETIME_HOURS - ((now - marker.timestamp) / (1000 * 60 * 60));
                 return (
                   <Marker 
                     key={marker.id} 
                     position={marker.position}
-                    icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '')}
+                    icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '', hoursRemaining)}
                     ref={(ref: L.Marker | null) => {
                       if (ref) {
                         markerRefs.current[marker.id] = ref;
@@ -1178,19 +1218,24 @@ function App() {
                         </PhotoInfo>
                         <div style={{ position: 'relative' }}>
                           {loadedPhotoUrls[marker.id] ? (
-                            <img 
-                              src={loadedPhotoUrls[marker.id]} 
-                              alt="Captured photo" 
-                              style={{ 
-                                width: '100%', 
-                                height: '200px', 
-                                objectFit: 'cover',
-                                pointerEvents: 'none',
-                                display: 'block',
-                                borderTopLeftRadius: '0',
-                                borderTopRightRadius: '0'
-                              }}
-                            />
+                            <>
+                              <img 
+                                src={loadedPhotoUrls[marker.id]} 
+                                alt="Captured photo" 
+                                style={{ 
+                                  width: '100%', 
+                                  height: '200px', 
+                                  objectFit: 'cover',
+                                  pointerEvents: 'none',
+                                  display: 'block',
+                                  borderTopLeftRadius: '0',
+                                  borderTopRightRadius: '0'
+                                }}
+                              />
+                              <DateOverlay>
+                                {marker.created_at ? `${new Date(marker.created_at).getFullYear()} ${new Date(marker.created_at).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(marker.created_at).getDate()).padStart(2, '0')}` : ''}
+                              </DateOverlay>
+                            </>
                           ) : (
                             <div style={{ 
                               width: '100%', 
