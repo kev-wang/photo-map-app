@@ -484,23 +484,23 @@ const DateOverlay = styled.div`
 `;
 
 // Add this after the existing styled components
-const ClusterBadge = styled.div`
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  background-color: #007AFF;
-  color: white;
-  font-size: 12px;
-  font-weight: 500;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  z-index: 1001;
-`;
+// const ClusterBadge = styled.div`
+//   position: absolute;
+//   top: -8px;
+//   right: -8px;
+//   background-color: #007AFF;
+//   color: white;
+//   font-size: 12px;
+//   font-weight: 500;
+//   width: 20px;
+//   height: 20px;
+//   border-radius: 50%;
+//   display: flex;
+//   align-items: center;
+//   justify-content: center;
+//   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+//   z-index: 1001;
+// `;
 
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
