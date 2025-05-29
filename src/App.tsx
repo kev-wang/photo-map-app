@@ -9,6 +9,8 @@ import { TermsAndConditions } from './TermsAndConditions';
 import ReactGA from 'react-ga4';
 import { FaPencilAlt, FaQuestionCircle } from 'react-icons/fa';
 import styled from '@emotion/styled';
+import MarkerClusterGroup from 'react-leaflet-markercluster';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 
 // Initialize Google Analytics with the provided Measurement ID
 ReactGA.initialize(import.meta.env.VITE_GA_MEASUREMENT_ID || '', {
@@ -479,6 +481,25 @@ const DateOverlay = styled.div`
   border-radius: 4px;
   z-index: 2;
   pointer-events: none;
+`;
+
+// Add this after the existing styled components
+const ClusterBadge = styled.div`
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background-color: #007AFF;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  z-index: 1001;
 `;
 
 function App() {
@@ -1121,6 +1142,81 @@ function App() {
     }
   }, [openPopupId]);
 
+  // Add this function before the App component
+  const createClusterCustomIcon = (cluster: any) => {
+    const markers = cluster.getAllChildMarkers();
+    const count = markers.length;
+    
+    // Find marker with longest life using attached data
+    const now = Date.now();
+    const markerWithLongestLife = markers.reduce((longest: any, current: any) => {
+      const longestData = longest.options.photoMarker;
+      const currentData = current.options.photoMarker;
+      const longestLife = LIFETIME_HOURS - ((now - longestData.timestamp) / (1000 * 60 * 60));
+      const currentLife = LIFETIME_HOURS - ((now - currentData.timestamp) / (1000 * 60 * 60));
+      return currentLife > longestLife ? current : longest;
+    }, markers[0]);
+    const markerData = markerWithLongestLife.options.photoMarker;
+
+    return L.divIcon({
+      html: `
+        <div style="
+          position: relative;
+          width: 40px;
+          height: 56px;
+          background-image: url('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png');
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+        ">
+          <div style="
+            position: absolute;
+            top: calc(50% - 9px);
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 1;
+          ">
+            <img 
+              src="${markerData.thumbnail_url}" 
+              alt="Preview" 
+              style="
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+              "
+            />
+          </div>
+          <div style="
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background-color: #007AFF;
+            color: white;
+            font-size: 12px;
+            font-weight: 500;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            z-index: 1001;
+          ">${count}</div>
+        </div>
+      `,
+      className: 'custom-cluster-icon',
+      iconSize: L.point(40, 56),
+      iconAnchor: L.point(20, 56)
+    });
+  };
+
   return (
     <AppContainer>
       <HelpButton onClick={() => setShowRules(true)} title="Show Rules">
@@ -1139,143 +1235,151 @@ function App() {
                 icon={createUserLocationIcon()}
               />
             )}
-            {markers
-              .filter(marker => !isMarkerExpired(marker.timestamp))
-              .map((marker) => {
-                // Calculate hours remaining for this marker
-                const now = Date.now();
-                const hoursRemaining = LIFETIME_HOURS - ((now - marker.timestamp) / (1000 * 60 * 60));
-                return (
-                  <Marker 
-                    key={marker.id} 
-                    position={marker.position}
-                    icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '', hoursRemaining)}
-                    ref={(ref: L.Marker | null) => {
-                      if (ref) {
-                        markerRefs.current[marker.id] = ref;
-                      }
-                    }}
-                    eventHandlers={{
-                      click: () => {
-                        // Close all other popups first
-                        Object.keys(markerRefs.current).forEach((id) => {
-                          if (id !== marker.id && markerRefs.current[id]) {
-                            markerRefs.current[id].closePopup();
-                          }
-                        });
-                        handleMarkerPopupOpen(marker.id);
-                      }
-                    }}
-                  >
-                    <StyledPopup
-                      closeButton={true}
-                      autoClose={false}
-                      closeOnClick={false}
-                      closeOnEscapeKey={false}
-                      maxWidth={220}
-                      minWidth={220}
-                      keepInView={true}
-                      className="custom-popup"
+            <MarkerClusterGroup
+              iconCreateFunction={createClusterCustomIcon}
+              maxClusterRadius={50}
+              spiderfyOnMaxZoom={true}
+              showCoverageOnHover={false}
+              zoomToBoundsOnClick={true}
+            >
+              {markers
+                .filter(marker => !isMarkerExpired(marker.timestamp))
+                .map((marker) => {
+                  const now = Date.now();
+                  const hoursRemaining = LIFETIME_HOURS - ((now - marker.timestamp) / (1000 * 60 * 60));
+                  return (
+                    <Marker 
+                      key={marker.id} 
+                      position={marker.position}
+                      icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '', hoursRemaining)}
+                      ref={(ref: L.Marker | null) => {
+                        if (ref) {
+                          markerRefs.current[marker.id] = ref;
+                          // Attach the full marker data to the Leaflet marker instance for cluster access
+                          (ref as any).options.photoMarker = marker;
+                        }
+                      }}
                       eventHandlers={{
-                        remove: () => {
-                          handleMarkerPopupClose(marker.id);
+                        click: () => {
+                          Object.keys(markerRefs.current).forEach((id) => {
+                            if (id !== marker.id && markerRefs.current[id]) {
+                              markerRefs.current[id].closePopup();
+                            }
+                          });
+                          handleMarkerPopupOpen(marker.id);
                         }
                       }}
                     >
-                      <div 
-                        style={{ 
-                          pointerEvents: 'auto',
-                          position: 'relative',
-                          zIndex: 1000,
-                          backgroundColor: 'white',
-                          borderRadius: '8px',
-                          overflow: 'hidden'
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
+                      <StyledPopup
+                        closeButton={true}
+                        autoClose={false}
+                        closeOnClick={false}
+                        closeOnEscapeKey={false}
+                        maxWidth={220}
+                        minWidth={220}
+                        keepInView={true}
+                        className="custom-popup"
+                        eventHandlers={{
+                          remove: () => {
+                            handleMarkerPopupClose(marker.id);
+                          }
                         }}
                       >
-                        <PhotoInfo style={{ position: 'static', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span role="img" aria-label="hourglass">⏳</span>
-                            <TimeRemaining>{calculateTimeRemaining(marker.timestamp)}</TimeRemaining>
-                          </span>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div 
+                          style={{ 
+                            pointerEvents: 'auto',
+                            position: 'relative',
+                            zIndex: 1000,
+                            backgroundColor: 'white',
+                            borderRadius: '8px',
+                            overflow: 'hidden'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                          }}
+                        >
+                          <PhotoInfo style={{ position: 'static', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <span role="img" aria-label="views">👁️</span>
-                              <span>{marker.views ?? 0}</span>
+                              <span role="img" aria-label="hourglass">⏳</span>
+                              <TimeRemaining>{calculateTimeRemaining(marker.timestamp)}</TimeRemaining>
                             </span>
-                            <InteractionCounts>
-                              <Count type="like">
-                                👍 {marker.likes}
-                              </Count>
-                              <Count type="dislike">
-                                👎 {marker.dislikes}
-                              </Count>
-                            </InteractionCounts>
-                          </span>
-                        </PhotoInfo>
-                        <div style={{ position: 'relative' }}>
-                          {loadedPhotoUrls[marker.id] ? (
-                            <>
-                              <img 
-                                src={loadedPhotoUrls[marker.id]} 
-                                alt="Captured photo" 
-                                style={{ 
-                                  width: '100%', 
-                                  height: '200px', 
-                                  objectFit: 'cover',
-                                  pointerEvents: 'none',
-                                  display: 'block',
-                                  borderTopLeftRadius: '0',
-                                  borderTopRightRadius: '0'
-                                }}
-                              />
-                              <DateOverlay>
-                                {marker.created_at ? `${new Date(marker.created_at).getFullYear()} ${new Date(marker.created_at).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(marker.created_at).getDate()).padStart(2, '0')}` : ''}
-                              </DateOverlay>
-                            </>
-                          ) : (
-                            <div style={{ 
-                              width: '100%', 
-                              height: '200px', 
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              backgroundColor: '#f0f0f0',
-                              borderTopLeftRadius: '0',
-                              borderTopRightRadius: '0'
-                            }}>
-                              Loading...
-                            </div>
-                          )}
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span role="img" aria-label="views">👁️</span>
+                                <span>{marker.views ?? 0}</span>
+                              </span>
+                              <InteractionCounts>
+                                <Count type="like">
+                                  👍 {marker.likes}
+                                </Count>
+                                <Count type="dislike">
+                                  👎 {marker.dislikes}
+                                </Count>
+                              </InteractionCounts>
+                            </span>
+                          </PhotoInfo>
+                          <div style={{ position: 'relative' }}>
+                            {loadedPhotoUrls[marker.id] ? (
+                              <>
+                                <img 
+                                  src={loadedPhotoUrls[marker.id]} 
+                                  alt="Captured photo" 
+                                  style={{ 
+                                    width: '100%', 
+                                    height: '200px', 
+                                    objectFit: 'cover',
+                                    pointerEvents: 'none',
+                                    display: 'block',
+                                    borderTopLeftRadius: '0',
+                                    borderTopRightRadius: '0'
+                                  }}
+                                />
+                                <DateOverlay>
+                                  {marker.created_at ? `${new Date(marker.created_at).getFullYear()} ${new Date(marker.created_at).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(marker.created_at).getDate()).padStart(2, '0')}` : ''}
+                                </DateOverlay>
+                              </>
+                            ) : (
+                              <div style={{ 
+                                width: '100%', 
+                                height: '200px', 
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: '#f0f0f0',
+                                borderTopLeftRadius: '0',
+                                borderTopRightRadius: '0'
+                              }}>
+                                Loading...
+                              </div>
+                            )}
+                          </div>
+                          <InteractionButtons>
+                            <InteractionButton 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDislike(marker.id);
+                              }}
+                              disabled={!!cardInteractions[marker.id] || userLikes <= userDislikes}
+                            >
+                              👎
+                            </InteractionButton>
+                            <InteractionButton 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleLike(marker.id);
+                              }}
+                              disabled={!!cardInteractions[marker.id]}
+                            >
+                              👍
+                            </InteractionButton>
+                          </InteractionButtons>
                         </div>
-                        <InteractionButtons>
-                          <InteractionButton 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDislike(marker.id);
-                            }}
-                            disabled={!!cardInteractions[marker.id] || userLikes <= userDislikes}
-                          >
-                            👎
-                          </InteractionButton>
-                          <InteractionButton 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleLike(marker.id);
-                            }}
-                            disabled={!!cardInteractions[marker.id]}
-                          >
-                            👍
-                          </InteractionButton>
-                        </InteractionButtons>
-                      </div>
-                    </StyledPopup>
-                  </Marker>
-                );
-              })}
+                      </StyledPopup>
+                    </Marker>
+                  );
+                })}
+            </MarkerClusterGroup>
         </MapContainer>
       </MapWrapper>
         <CenteredAddButton onClick={startCamera}>+</CenteredAddButton>
