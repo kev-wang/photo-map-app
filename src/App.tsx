@@ -483,6 +483,25 @@ const DateOverlay = styled.div`
   pointer-events: none;
 `;
 
+// Add this after the existing styled components
+const ClusterBadge = styled.div`
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background-color: #007AFF;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  z-index: 1001;
+`;
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
@@ -932,13 +951,504 @@ function App() {
     const showCreatorLabel = currentZoom >= 15;
     return L.divIcon({
       className: 'custom-marker',
-      html: `<div></div>`, // placeholder, since the actual implementation is now in the cluster icon
+      html: `
+        <div style="
+          position: relative;
+          width: 40px;
+          height: 56px;
+          background-image: url('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png');
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+        ">
+          ${showFadeSoon ? `<div style="
+            position: absolute;
+            top: -32px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ff9800;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            z-index: 1001;
+            pointer-events: none;
+            background: rgba(255, 255, 255, 0.4);
+            padding: 2px 6px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: block;">
+            &lt;3 hrs till I fade
+          </div>` : ''}
+          <div style="
+            position: absolute;
+            top: calc(50% - 9px);
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 1;
+          ">
+            <img 
+              src="${thumbnailUrl}" 
+              alt="Preview" 
+              style="
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+              "
+            />
+          </div>
+          <div style="
+            position: absolute;
+            bottom: -28px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #1a237e;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            z-index: 1000;
+            pointer-events: none;
+            background: rgba(255, 255, 255, 0.4);
+            padding: 2px 6px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: ${showCreatorLabel ? 'block' : 'none'};
+          ">${initials}</div>
+        </div>
+      `,
+      iconSize: [40, 56],
+      iconAnchor: [20, 56],
+      popupAnchor: [0, -56]
+    });
+  };
+
+  // Add zoom change handler
+  useEffect(() => {
+    if (mapRef.current) {
+      mapRef.current.on('zoomend', () => {
+        // Force marker icons to update when zoom changes
+        markers.forEach(marker => {
+          if (markerRefs.current[marker.id]) {
+            const now = Date.now();
+            const hoursRemaining = LIFETIME_HOURS - ((now - marker.timestamp) / (1000 * 60 * 60));
+            markerRefs.current[marker.id].setIcon(
+              createCustomIcon(marker.created_by, marker.thumbnail_url || '', hoursRemaining)
+            );
+          }
+        });
+      });
+    }
+  }, [markers]);
+
+  const createUserLocationIcon = () => {
+    return L.divIcon({
+      className: 'user-location-marker',
+      html: `
+        <div style="
+          position: relative;
+          width: 24px;
+          height: 24px;
+        ">
+          <div style="
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 18px;
+            height: 18px;
+            background-color: #4285F4;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 0 2px #4285F4;
+            animation: pulse 2s infinite;
+          "></div>
+          <div style="
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 6px;
+            height: 6px;
+            background-color: white;
+            border-radius: 50%;
+            z-index: 1;
+          "></div>
+          <style>
+            @keyframes pulse {
+              0% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 1;
+              }
+              50% {
+                transform: translate(-50%, -50%) scale(1.5);
+                opacity: 0.5;
+              }
+              100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 1;
+              }
+            }
+          </style>
+        </div>
+      `,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    });
+  };
+
+  const handleTermsAccept = () => {
+    ReactGA.event({ category: 'T&C', action: 'Accept' });
+    setTermsAccepted(true);
+  };
+
+  // Example: Track marker popup open/close
+  const handleMarkerPopupOpen = async (markerId: string) => {
+    ReactGA.event({ category: 'Photo', action: 'Open Popup', label: markerId });
+    
+    if (!loadedPhotoUrls[markerId]) {
+      try {
+        const photoUrl = await database.getPhotoUrl(markerId);
+        setLoadedPhotoUrls(prev => ({
+          ...prev,
+          [markerId]: photoUrl
+        }));
+      } catch (error) {
+        console.error('Error loading photo');
+        showNotification('Error loading photo');
+      }
+    }
+
+    try {
+      const newViews = await database.incrementViews(markerId);
+      setMarkers(prev => prev.map(m => m.id === markerId ? { ...m, views: newViews } : m));
+    } catch (error) {
+      console.error('Error updating views');
+    }
+    
+    setOpenPopupId(markerId);
+  };
+  const handleMarkerPopupClose = (markerId: string) => {
+    ReactGA.event({ category: 'Marker', action: 'Popup Close', label: markerId });
+  };
+
+  useEffect(() => {
+    if (openPopupId && markerRefs.current[openPopupId]) {
+      markerRefs.current[openPopupId].openPopup();
+    }
+  }, [openPopupId]);
+
+  // Add this function before the App component
+  const createClusterCustomIcon = (cluster: any) => {
+    const markers = cluster.getAllChildMarkers();
+    const count = markers.length;
+    
+    // Find marker with longest life using attached data
+    const now = Date.now();
+    const markerWithLongestLife = markers.reduce((longest: any, current: any) => {
+      const longestData = longest.options.photoMarker;
+      const currentData = current.options.photoMarker;
+      const longestLife = LIFETIME_HOURS - ((now - longestData.timestamp) / (1000 * 60 * 60));
+      const currentLife = LIFETIME_HOURS - ((now - currentData.timestamp) / (1000 * 60 * 60));
+      return currentLife > longestLife ? current : longest;
+    }, markers[0]);
+    const markerData = markerWithLongestLife.options.photoMarker;
+
+    return L.divIcon({
+      html: `
+        <div style="
+          position: relative;
+          width: 40px;
+          height: 56px;
+          background-image: url('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png');
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+        ">
+          <div style="
+            position: absolute;
+            top: calc(50% - 9px);
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            overflow: hidden;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 1;
+          ">
+            <img 
+              src="${markerData.thumbnail_url}" 
+              alt="Preview" 
+              style="
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+              "
+            />
+          </div>
+          <div style="
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background-color: #007AFF;
+            color: white;
+            font-size: 12px;
+            font-weight: 500;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            z-index: 1001;
+          ">${count}</div>
+        </div>
+      `,
+      className: 'custom-cluster-icon',
+      iconSize: L.point(40, 56),
+      iconAnchor: L.point(20, 56)
     });
   };
 
   return (
     <AppContainer>
-      {/* Rest of the component content */}
+      <HelpButton onClick={() => setShowRules(true)} title="Show Rules">
+        <FaQuestionCircle />
+      </HelpButton>
+      <BlurredWrapper blurred={!termsAccepted}>
+      <Notification isVisible={!!notification}>
+        {notification}
+      </Notification>
+      <MapWrapper>
+        <MapContainer {...mapProps}>
+          <TileLayer {...tileProps} />
+            {userLocation && (
+              <Marker
+                position={userLocation}
+                icon={createUserLocationIcon()}
+              />
+            )}
+            <MarkerClusterGroup
+              iconCreateFunction={createClusterCustomIcon}
+              maxClusterRadius={50}
+              spiderfyOnMaxZoom={true}
+              showCoverageOnHover={false}
+              zoomToBoundsOnClick={true}
+            >
+              {markers
+                .filter(marker => !isMarkerExpired(marker.timestamp))
+                .map((marker) => {
+                  const now = Date.now();
+                  const hoursRemaining = LIFETIME_HOURS - ((now - marker.timestamp) / (1000 * 60 * 60));
+                  return (
+                    <Marker 
+                      key={marker.id} 
+                      position={marker.position}
+                      icon={createCustomIcon(marker.created_by, marker.thumbnail_url || '', hoursRemaining)}
+                      ref={(ref: L.Marker | null) => {
+                        if (ref) {
+                          markerRefs.current[marker.id] = ref;
+                          // Attach the full marker data to the Leaflet marker instance for cluster access
+                          (ref as any).options.photoMarker = marker;
+                        }
+                      }}
+                      eventHandlers={{
+                        click: () => {
+                          Object.keys(markerRefs.current).forEach((id) => {
+                            if (id !== marker.id && markerRefs.current[id]) {
+                              markerRefs.current[id].closePopup();
+                            }
+                          });
+                          handleMarkerPopupOpen(marker.id);
+                        }
+                      }}
+                    >
+                      <StyledPopup
+                        closeButton={true}
+                        autoClose={false}
+                        closeOnClick={false}
+                        closeOnEscapeKey={false}
+                        maxWidth={220}
+                        minWidth={220}
+                        keepInView={true}
+                        className="custom-popup"
+                        eventHandlers={{
+                          remove: () => {
+                            handleMarkerPopupClose(marker.id);
+                          }
+                        }}
+                      >
+                        <div 
+                          style={{ 
+                            pointerEvents: 'auto',
+                            position: 'relative',
+                            zIndex: 1000,
+                            backgroundColor: 'white',
+                            borderRadius: '8px',
+                            overflow: 'hidden'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                          }}
+                        >
+                          <PhotoInfo style={{ position: 'static', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span role="img" aria-label="hourglass">⏳</span>
+                              <TimeRemaining>{calculateTimeRemaining(marker.timestamp)}</TimeRemaining>
+                            </span>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <span role="img" aria-label="views">👁️</span>
+                                <span>{marker.views ?? 0}</span>
+                              </span>
+                              <InteractionCounts>
+                                <Count type="like">
+                                  👍 {marker.likes}
+                                </Count>
+                                <Count type="dislike">
+                                  👎 {marker.dislikes}
+                                </Count>
+                              </InteractionCounts>
+                            </span>
+                          </PhotoInfo>
+                          <div style={{ position: 'relative' }}>
+                            {loadedPhotoUrls[marker.id] ? (
+                              <>
+                                <img 
+                                  src={loadedPhotoUrls[marker.id]} 
+                                  alt="Captured photo" 
+                                  style={{ 
+                                    width: '100%', 
+                                    height: '200px', 
+                                    objectFit: 'cover',
+                                    pointerEvents: 'none',
+                                    display: 'block',
+                                    borderTopLeftRadius: '0',
+                                    borderTopRightRadius: '0'
+                                  }}
+                                />
+                                <DateOverlay>
+                                  {marker.created_at ? `${new Date(marker.created_at).getFullYear()} ${new Date(marker.created_at).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(marker.created_at).getDate()).padStart(2, '0')}` : ''}
+                                </DateOverlay>
+                              </>
+                            ) : (
+                              <div style={{ 
+                                width: '100%', 
+                                height: '200px', 
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: '#f0f0f0',
+                                borderTopLeftRadius: '0',
+                                borderTopRightRadius: '0'
+                              }}>
+                                Loading...
+                              </div>
+                            )}
+                          </div>
+                          <InteractionButtons>
+                            <InteractionButton 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDislike(marker.id);
+                              }}
+                              disabled={!!cardInteractions[marker.id] || userLikes <= userDislikes}
+                            >
+                              👎
+                            </InteractionButton>
+                            <InteractionButton 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleLike(marker.id);
+                              }}
+                              disabled={!!cardInteractions[marker.id]}
+                            >
+                              👍
+                            </InteractionButton>
+                          </InteractionButtons>
+                        </div>
+                      </StyledPopup>
+                    </Marker>
+                  );
+                })}
+            </MarkerClusterGroup>
+        </MapContainer>
+      </MapWrapper>
+        <CenteredAddButton onClick={startCamera}>+</CenteredAddButton>
+        <InitialsRow>
+          <AsText>post as</AsText>
+          {editingInitials ? (
+            <InlineInput
+              type="text"
+              value={userInitials}
+              autoFocus
+              maxLength={5}
+              onChange={handleInitialsInputChange}
+              onBlur={handleInitialsInputBlur}
+              onKeyDown={handleInitialsInputKeyDown}
+            />
+          ) : (
+            <CreatedByLabel onClick={handleInitialsLabelClick} title="Click to edit your initials">
+              {userInitials}
+              <PencilIcon onClick={handleInitialsLabelClick} />
+            </CreatedByLabel>
+          )}
+        </InitialsRow>
+      <CameraOverlay isVisible={isCameraOpen}>
+        <CameraPreview 
+          ref={videoRef} 
+          autoPlay 
+          playsInline 
+          muted
+            onLoadedMetadata={() => {}}
+            onCanPlay={() => {}}
+        />
+        <CameraControls>
+            <CameraButton 
+              onClick={() => {
+                stopCamera();
+              }}
+            >
+              ✕
+            </CameraButton>
+            <CameraButton 
+              onClick={() => {
+                capturePhoto();
+              }}
+              disabled={isCapturing}
+            >
+              📸
+              <LoadingOverlay isVisible={isCapturing} />
+            </CameraButton>
+        </CameraControls>
+      </CameraOverlay>
+      </BlurredWrapper>
+      {!termsAccepted && (
+        <TermsAndConditions onAccept={handleTermsAccept} />
+      )}
+      {showRules && (
+        <ModalOverlay>
+          <ModalContent>
+            <HeaderBanner>Rules</HeaderBanner>
+            <RulesText>
+              <ul>
+                <li>Every photo posted have 7 days of life ⏳ by default, when life runs out photo will fade from the map</li>
+                <li>Every "like" 👍 will extend photo's life by 7 days, every "dislike" 👎 will reduce photo's life by 7 days</li>
+                <li>You must "like" a photo in order to "dislike" another photo</li>
+              </ul>
+            </RulesText>
+            <CloseButton onClick={() => setShowRules(false)}>Close</CloseButton>
+          </ModalContent>
+        </ModalOverlay>
+      )}
     </AppContainer>
   );
 }
