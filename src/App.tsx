@@ -3,11 +3,11 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import type { MapContainerProps, TileLayerProps } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { database, PhotoMarker as BasePhotoMarker, testSupabaseConnection, supabase } from './supabase';
+import { database, PhotoMarker as BasePhotoMarker, testSupabaseConnection, supabase, Comment } from './supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { TermsAndConditions } from './TermsAndConditions';
 import ReactGA from 'react-ga4';
-import { FaPencilAlt, FaQuestionCircle } from 'react-icons/fa';
+import { FaPencilAlt, FaQuestionCircle, FaComment, FaRegComment } from 'react-icons/fa';
 import styled from '@emotion/styled';
 import MarkerClusterGroup from 'react-leaflet-markercluster';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
@@ -502,6 +502,217 @@ const DateOverlay = styled.div`
 //   z-index: 1001;
 // `;
 
+const MessageBubbleButton = styled.button`
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1001;
+  color: white;
+  font-size: 16px;
+  padding: 0;
+  line-height: 1;
+`;
+
+const CommentCount = styled.span`
+  position: absolute;
+  right: -8px;
+  top: -8px;
+  background: #007AFF;
+  color: white;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  border: 2px solid white;
+  z-index: 1002;
+`;
+
+const CommentCard = styled(ModalContent)`
+  display: flex;
+  flex-direction: column;
+  height: 80vh;
+  max-height: 800px;
+  border-radius: 16px !important;
+  overflow: hidden;
+`;
+
+const CommentImageSection = styled.div`
+  height: 33%;
+  position: relative;
+  background: black;
+  overflow: hidden;
+`;
+
+const CommentImage = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const CommentSection = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+`;
+
+const CommentItem = styled.div`
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+`;
+
+const CommentHeader = styled.div`
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  margin-bottom: 8px;
+  margin-left: 2px;
+`;
+
+const CommentUserInfo = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #666;
+  font-size: 14px;
+`;
+
+const CommentContent = styled.div`
+  font-size: 14px;
+  line-height: 1.4;
+  margin: 8px 0 8px 10px;
+`;
+
+const CommentActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+`;
+
+const CommentInputContainer = styled.div`
+  padding: 16px;
+  border-top: 1px solid #eee;
+  background: white;
+`;
+
+const CommentInput = styled.textarea`
+  width: 100%;
+  height: 80px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+  resize: none;
+  font-family: inherit;
+  font-size: 14px;
+`;
+
+const CommentInputFooter = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+`;
+
+const CharacterCount = styled.span`
+  color: #666;
+  font-size: 12px;
+`;
+
+const CommentButtons = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-top: 5px;
+`;
+
+const CommentButton = styled.button<{ primary?: boolean }>`
+  padding: 8px 16px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background: ${props => props.primary ? '#007AFF' : 'white'};
+  color: ${props => props.primary ? 'white' : '#666'};
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &:not(:disabled):hover {
+    background: ${props => props.primary ? '#005bb5' : '#f5f5f5'};
+  }
+`;
+
+// Add a styled close button matching the popup style
+const CommentCloseButton = styled.button`
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.3);
+  color: white;
+  border: none;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1002;
+  cursor: pointer;
+  padding: 0;
+`;
+
+const CommentTimestamp = styled.span`
+  font-size: 12px;
+  font-family: inherit;
+  color: #888;
+  font-weight: 500;
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+`;
+
+const CenteredCommentInputContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 16px 0;
+`;
+
+const CenteredCommentInput = styled.textarea`
+  width: 80%;
+  max-width: 340px;
+  min-width: 220px;
+  height: 80px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0 5px 0;
+  resize: none;
+  font-family: inherit;
+  font-size: 14px;
+  box-sizing: border-box;
+`;
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
@@ -524,6 +735,13 @@ function App() {
   const [isCapturing, setIsCapturing] = useState(false);
   const markerRefs = useRef<Record<string, L.Marker>>({});
   const [showRules, setShowRules] = useState(false);
+  const [showCommentCard, setShowCommentCard] = useState(false);
+  const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [isPostingComment, setIsPostingComment] = useState(false);
+  const [showCommentInput, setShowCommentInput] = useState(false);
+  const [popupCommentCount, setPopupCommentCount] = useState<number>(0);
 
   // Track app load (pageview)
   useEffect(() => {
@@ -1110,6 +1328,21 @@ function App() {
   const handleMarkerPopupOpen = async (markerId: string) => {
     ReactGA.event({ category: 'Photo', action: 'Open Popup', label: markerId });
     
+    // Fetch comment count for this marker
+    try {
+      const { count, error } = await supabase
+        .from('comments')
+        .select('id', { count: 'exact', head: true })
+        .eq('photo_id', markerId);
+      if (!error && typeof count === 'number') {
+        setPopupCommentCount(count);
+      } else {
+        setPopupCommentCount(0);
+      }
+    } catch (e) {
+      setPopupCommentCount(0);
+    }
+
     if (!loadedPhotoUrls[markerId]) {
       try {
         const photoUrl = await database.getPhotoUrl(markerId);
@@ -1215,6 +1448,98 @@ function App() {
       iconSize: L.point(40, 56),
       iconAnchor: L.point(20, 56)
     });
+  };
+
+  const formatTimeAgo = (timestamp: number) => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    
+    if (seconds < 60) return '<1m ago';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    if (seconds < 2592000) return `${Math.floor(seconds / 86400)}d ago`;
+    if (seconds < 31536000) return `${Math.floor(seconds / 2592000)}mo ago`;
+    return `${Math.floor(seconds / 31536000)}y ago`;
+  };
+
+  const canPostComment = (photoId: string, userInitials: string) => {
+    const key = `${photoId}_${userInitials}`;
+    const lastCommentTime = localStorage.getItem(key);
+    
+    if (!lastCommentTime) return true;
+    
+    const timeSinceLastComment = Date.now() - parseInt(lastCommentTime);
+    return timeSinceLastComment >= 30000; // 30 seconds
+  };
+
+  const updateRateLimit = (photoId: string, userInitials: string) => {
+    const key = `${photoId}_${userInitials}`;
+    localStorage.setItem(key, Date.now().toString());
+  };
+
+  const handleOpenCommentCard = async (photoId: string) => {
+    setSelectedPhotoId(photoId);
+    setShowCommentCard(true);
+    try {
+      const photoComments = await database.getComments(photoId);
+      setComments(photoComments);
+    } catch (error) {
+      console.error('Error loading comments:', error);
+      showNotification('Error loading comments');
+    }
+  };
+
+  const handleCloseCommentCard = () => {
+    setShowCommentCard(false);
+    setSelectedPhotoId(null);
+    setComments([]);
+    setNewComment('');
+    setShowCommentInput(false);
+  };
+
+  const handlePostComment = async () => {
+    if (!selectedPhotoId || !newComment.trim()) return;
+    if (!canPostComment(selectedPhotoId, userInitials)) {
+      showNotification('Please wait 30 seconds before posting another comment');
+      return;
+    }
+    setIsPostingComment(true);
+    try {
+      const comment = await database.addComment({
+        photo_id: selectedPhotoId,
+        user_initials: userInitials,
+        content: newComment.trim()
+      });
+      setComments(prev => [comment, ...prev]);
+      setNewComment('');
+      setShowCommentInput(false);
+      updateRateLimit(selectedPhotoId, userInitials);
+      showNotification('Comment posted successfully');
+    } catch (error) {
+      console.error('Error posting comment:', error);
+      showNotification('Error posting comment');
+    } finally {
+      setIsPostingComment(false);
+    }
+  };
+
+  const handleCommentLike = async (commentId: string, currentLikes: number) => {
+    try {
+      const updatedComment = await database.updateCommentLikes(commentId, currentLikes + 1, 0);
+      setComments(prev => prev.map(c => c.id === commentId ? updatedComment : c));
+    } catch (error) {
+      console.error('Error liking comment:', error);
+      showNotification('Error liking comment');
+    }
+  };
+
+  const handleCommentDislike = async (commentId: string, currentDislikes: number) => {
+    try {
+      const updatedComment = await database.updateCommentLikes(commentId, 0, currentDislikes + 1);
+      setComments(prev => prev.map(c => c.id === commentId ? updatedComment : c));
+    } catch (error) {
+      console.error('Error disliking comment:', error);
+      showNotification('Error disliking comment');
+    }
   };
 
   return (
@@ -1338,6 +1663,12 @@ function App() {
                                 <DateOverlay>
                                   {marker.created_at ? `${new Date(marker.created_at).getFullYear()} ${new Date(marker.created_at).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(marker.created_at).getDate()).padStart(2, '0')}` : ''}
                                 </DateOverlay>
+                                <MessageBubbleButton onClick={() => handleOpenCommentCard(marker.id)}>
+                                  <span role="img" aria-label="comment" style={{ fontSize: '16px' }}>💬</span>
+                                  {openPopupId === marker.id && popupCommentCount > 0 && (
+                                    <CommentCount>{popupCommentCount}</CommentCount>
+                                  )}
+                                </MessageBubbleButton>
                               </>
                             ) : (
                               <div style={{ 
@@ -1447,6 +1778,77 @@ function App() {
             </RulesText>
             <CloseButton onClick={() => setShowRules(false)}>Close</CloseButton>
           </ModalContent>
+        </ModalOverlay>
+      )}
+      {showCommentCard && selectedPhotoId && (
+        <ModalOverlay>
+          <CommentCard>
+            <CommentImageSection>
+              <CommentCloseButton onClick={handleCloseCommentCard}>✕</CommentCloseButton>
+              <CommentImage 
+                src={loadedPhotoUrls[selectedPhotoId]} 
+                alt="Photo" 
+              />
+              <DateOverlay>
+                {markers.find(m => m.id === selectedPhotoId)?.created_at 
+                  ? `${new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).getFullYear()} ${new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).getDate()).padStart(2, '0')}` 
+                  : ''}
+              </DateOverlay>
+              <MessageBubbleButton onClick={() => setShowCommentInput(true)}>
+                <span role="img" aria-label="comment" style={{ fontSize: '16px' }}>💬</span>
+                {comments.length > 0 && (
+                  <CommentCount>{comments.length}</CommentCount>
+                )}
+              </MessageBubbleButton>
+            </CommentImageSection>
+            
+            <CommentSection>
+              {comments.map(comment => (
+                <CommentItem key={comment.id}>
+                  <CommentHeader>
+                    <CommentUserInfo>
+                      <CreatedByLabel>{comment.user_initials}</CreatedByLabel>
+                      <span>•</span>
+                      <CommentTimestamp>{formatTimeAgo(new Date(comment.created_at).getTime())}</CommentTimestamp>
+                    </CommentUserInfo>
+                  </CommentHeader>
+                  <CommentContent>{comment.content}</CommentContent>
+                </CommentItem>
+              ))}
+            </CommentSection>
+
+            {showCommentInput && (
+              <CenteredCommentInputContainer>
+                <CenteredCommentInput
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value.slice(0, 700))}
+                  placeholder="Post a comment"
+                  maxLength={700}
+                  autoFocus
+                />
+                <CommentInputFooter style={{ width: '80%', maxWidth: 340, minWidth: 220 }}>
+                  <CharacterCount>
+                    {newComment.length}/700
+                  </CharacterCount>
+                  <CommentButtons>
+                    <CommentButton 
+                      onClick={() => { setNewComment(''); setShowCommentInput(false); }}
+                      disabled={isPostingComment}
+                    >
+                      Cancel
+                    </CommentButton>
+                    <CommentButton 
+                      onClick={handlePostComment}
+                      disabled={!newComment.trim() || isPostingComment}
+                      primary={!!newComment.trim()}
+                    >
+                      Post
+                    </CommentButton>
+                  </CommentButtons>
+                </CommentInputFooter>
+              </CenteredCommentInputContainer>
+            )}
+          </CommentCard>
         </ModalOverlay>
       )}
     </AppContainer>

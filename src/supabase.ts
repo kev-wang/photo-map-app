@@ -42,6 +42,16 @@ export interface PhotoMarker {
   created_at?: string;
 }
 
+export interface Comment {
+  id: string;
+  photo_id: string;
+  user_initials: string;
+  content: string;
+  created_at: string;
+  likes: number;
+  dislikes: number;
+}
+
 export const database = {
   // Get all active markers
   getMarkers: async () => {
@@ -169,5 +179,55 @@ export const database = {
     }
     console.log('Views incremented successfully. New count:', data);
     return data;
+  },
+
+  // Comment functions
+  async getComments(photoId: string): Promise<Comment[]> {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('photo_id', photoId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async addComment(comment: Omit<Comment, 'id' | 'created_at' | 'likes' | 'dislikes'>): Promise<Comment> {
+    const { data, error } = await supabase
+      .from('comments')
+      .insert([comment])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async updateCommentLikes(commentId: string, likes: number, dislikes: number): Promise<Comment> {
+    const { data, error } = await supabase
+      .from('comments')
+      .update({ likes, dislikes })
+      .eq('id', commentId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  // Get comment counts for all markers
+  async getCommentCounts(): Promise<Record<string, number>> {
+    const { data, error } = await supabase
+      .from('comments')
+      .select('photo_id, count:id')
+      .group('photo_id');
+    if (error) throw error;
+    // Convert to { [photo_id]: count }
+    const result: Record<string, number> = {};
+    (data || []).forEach((row: any) => {
+      result[row.photo_id] = Number(row.count);
+    });
+    return result;
   }
 }; 
