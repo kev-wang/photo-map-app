@@ -214,20 +214,5 @@ export const database = {
 
     if (error) throw error;
     return data;
-  },
-
-  // Get comment counts for all markers
-  async getCommentCounts(): Promise<Record<string, number>> {
-    const { data, error } = await supabase
-      .from('comments')
-      .select('photo_id, count:id')
-      .group('photo_id');
-    if (error) throw error;
-    // Convert to { [photo_id]: count }
-    const result: Record<string, number> = {};
-    (data || []).forEach((row: any) => {
-      result[row.photo_id] = Number(row.count);
-    });
-    return result;
   }
 }; 

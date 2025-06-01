@@ -7,7 +7,7 @@ import { database, PhotoMarker as BasePhotoMarker, testSupabaseConnection, supab
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { TermsAndConditions } from './TermsAndConditions';
 import ReactGA from 'react-ga4';
-import { FaPencilAlt, FaQuestionCircle, FaComment, FaRegComment } from 'react-icons/fa';
+import { FaPencilAlt, FaQuestionCircle } from 'react-icons/fa';
 import styled from '@emotion/styled';
 import MarkerClusterGroup from 'react-leaflet-markercluster';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
@@ -591,31 +591,6 @@ const CommentContent = styled.div`
   font-size: 14px;
   line-height: 1.4;
   margin: 8px 0 8px 10px;
-`;
-
-const CommentActions = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 8px;
-`;
-
-const CommentInputContainer = styled.div`
-  padding: 16px;
-  border-top: 1px solid #eee;
-  background: white;
-`;
-
-const CommentInput = styled.textarea`
-  width: 100%;
-  height: 80px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  padding: 12px;
-  margin: 12px 0;
-  resize: none;
-  font-family: inherit;
-  font-size: 14px;
 `;
 
 const CommentInputFooter = styled.div`
@@ -1519,26 +1494,6 @@ function App() {
       showNotification('Error posting comment');
     } finally {
       setIsPostingComment(false);
-    }
-  };
-
-  const handleCommentLike = async (commentId: string, currentLikes: number) => {
-    try {
-      const updatedComment = await database.updateCommentLikes(commentId, currentLikes + 1, 0);
-      setComments(prev => prev.map(c => c.id === commentId ? updatedComment : c));
-    } catch (error) {
-      console.error('Error liking comment:', error);
-      showNotification('Error liking comment');
-    }
-  };
-
-  const handleCommentDislike = async (commentId: string, currentDislikes: number) => {
-    try {
-      const updatedComment = await database.updateCommentLikes(commentId, 0, currentDislikes + 1);
-      setComments(prev => prev.map(c => c.id === commentId ? updatedComment : c));
-    } catch (error) {
-      console.error('Error disliking comment:', error);
-      showNotification('Error disliking comment');
     }
   };
 
