@@ -9,6 +9,7 @@ import { TermsAndConditions } from './TermsAndConditions';
 import ReactGA from 'react-ga4';
 import { FaPencilAlt, FaQuestionCircle } from 'react-icons/fa';
 import styled from '@emotion/styled';
+import { css } from '@emotion/react';
 import MarkerClusterGroup from 'react-leaflet-markercluster';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 
@@ -498,8 +499,6 @@ const DateOverlay = styled.div`
 //   display: flex;
 //   align-items: center;
 //   justify-content: center;
-//   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-//   z-index: 1001;
 // `;
 
 const MessageBubbleButton = styled.button`
@@ -544,26 +543,40 @@ const CommentCard = styled(ModalContent)`
   overflow: hidden;
 `;
 
-const CommentImageSection = styled.div`
-  height: 33%;
+const CommentImageSection = styled.div<{ isCollapsed?: boolean }>`
+  height: ${props => props.isCollapsed ? '100%' : '33%'};
   position: relative;
   background: black;
   overflow: hidden;
+  transition: height 0.3s ease-in-out;
 `;
 
-const CommentImage = styled.img`
+const CommentImage = styled.img<{ isCollapsed?: boolean }>`
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: ${props => props.isCollapsed ? 'cover' : 'cover'};
+  transition: object-fit 0.3s ease-in-out;
 `;
 
-const CommentSection = styled.div`
-  flex: 1;
-  overflow-y: auto;
+const CommentSection = styled.div<{ isCollapsed?: boolean }>`
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 1;
+  overflow-y: auto;
+  transition: opacity 0.3s ease-in-out, visibility 0.3s ease-in-out, max-height 0.3s ease-in-out, padding 0.3s ease-in-out, flex 0.3s ease-in-out;
+  border-top: 1px solid #eee;
+
+  ${props => props.isCollapsed && css`
+    opacity: 0;
+    visibility: hidden;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    flex: 0;
+    border-top: none;
+  `}
 `;
 
 const CommentItem = styled.div`
@@ -688,6 +701,34 @@ const CenteredCommentInput = styled.textarea`
   box-sizing: border-box;
 `;
 
+const CollapseTrigger = styled.div`
+  text-align: center;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 30px;
+  color: black;
+  line-height: 1;
+  background-color: white;
+  border-bottom: 1px solid #eee;
+  user-select: none;
+`;
+
+const ExpandTrigger = styled.div`
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 30px;
+  color: white;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 1003;
+  line-height: 1;
+  user-select: none;
+`;
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
@@ -717,6 +758,7 @@ function App() {
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [showCommentInput, setShowCommentInput] = useState(false);
   const [popupCommentCount, setPopupCommentCount] = useState<number>(0);
+  const [isCommentSectionCollapsed, setIsCommentSectionCollapsed] = useState(false);
 
   // Track app load (pageview)
   useEffect(() => {
@@ -1451,9 +1493,13 @@ function App() {
     localStorage.setItem(key, Date.now().toString());
   };
 
-  const handleOpenCommentCard = async (photoId: string) => {
+  const handleOpenCommentCard = async (photoId: string, startCollapsed: boolean = false, activateInput: boolean = false) => {
     setSelectedPhotoId(photoId);
     setShowCommentCard(true);
+    setIsCommentSectionCollapsed(startCollapsed);
+    if (activateInput) {
+      setShowCommentInput(true);
+    }
     try {
       const photoComments = await database.getComments(photoId);
       setComments(photoComments);
@@ -1469,6 +1515,7 @@ function App() {
     setComments([]);
     setNewComment('');
     setShowCommentInput(false);
+    setIsCommentSectionCollapsed(false);
   };
 
   const handlePostComment = async () => {
@@ -1576,7 +1623,7 @@ function App() {
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            e.preventDefault();
+                            handleOpenCommentCard(marker.id, true, false);
                           }}
                         >
                           <PhotoInfo style={{ position: 'static', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
@@ -1599,7 +1646,13 @@ function App() {
                               </InteractionCounts>
                             </span>
                           </PhotoInfo>
-                          <div style={{ position: 'relative' }}>
+                          <div 
+                            style={{ position: 'relative', cursor: 'pointer' }} 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenCommentCard(marker.id, true, false);
+                            }}
+                          >
                             {loadedPhotoUrls[marker.id] ? (
                               <>
                                 <img 
@@ -1618,7 +1671,10 @@ function App() {
                                 <DateOverlay>
                                   {marker.created_at ? `${new Date(marker.created_at).getFullYear()} ${new Date(marker.created_at).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(marker.created_at).getDate()).padStart(2, '0')}` : ''}
                                 </DateOverlay>
-                                <MessageBubbleButton onClick={() => handleOpenCommentCard(marker.id)}>
+                                <MessageBubbleButton onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenCommentCard(marker.id, false, true);
+                                }}>
                                   <span role="img" aria-label="comment" style={{ fontSize: '16px' }}>💬</span>
                                   {openPopupId === marker.id && popupCommentCount > 0 && (
                                     <CommentCount>{popupCommentCount}</CommentCount>
@@ -1738,26 +1794,36 @@ function App() {
       {showCommentCard && selectedPhotoId && (
         <ModalOverlay>
           <CommentCard>
-            <CommentImageSection>
+            <CommentImageSection isCollapsed={isCommentSectionCollapsed}>
               <CommentCloseButton onClick={handleCloseCommentCard}>✕</CommentCloseButton>
-              <CommentImage 
-                src={loadedPhotoUrls[selectedPhotoId]} 
-                alt="Photo" 
+              <CommentImage
+                src={loadedPhotoUrls[selectedPhotoId]}
+                alt="Photo"
+                isCollapsed={isCommentSectionCollapsed}
               />
               <DateOverlay>
-                {markers.find(m => m.id === selectedPhotoId)?.created_at 
-                  ? `${new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).getFullYear()} ${new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).getDate()).padStart(2, '0')}` 
+                {markers.find(m => m.id === selectedPhotoId)?.created_at
+                  ? `${new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).getFullYear()} ${new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).toLocaleString('en-US', { month: 'short' }).toUpperCase()} ${String(new Date(markers.find(m => m.id === selectedPhotoId)!.created_at!).getDate()).padStart(2, '0')}`
                   : ''}
               </DateOverlay>
-              <MessageBubbleButton onClick={() => setShowCommentInput(true)}>
+              <MessageBubbleButton onClick={(e) => {
+                e.stopPropagation();
+                handleOpenCommentCard(selectedPhotoId, false, true);
+              }}>
                 <span role="img" aria-label="comment" style={{ fontSize: '16px' }}>💬</span>
                 {comments.length > 0 && (
                   <CommentCount>{comments.length}</CommentCount>
                 )}
               </MessageBubbleButton>
             </CommentImageSection>
+
+            {!isCommentSectionCollapsed && (
+              <CollapseTrigger onClick={() => setIsCommentSectionCollapsed(true)}>
+                ︾
+              </CollapseTrigger>
+            )}
             
-            <CommentSection>
+            <CommentSection isCollapsed={isCommentSectionCollapsed}>
               {comments.map(comment => (
                 <CommentItem key={comment.id}>
                   <CommentHeader>
@@ -1772,7 +1838,7 @@ function App() {
               ))}
             </CommentSection>
 
-            {showCommentInput && (
+            {showCommentInput && !isCommentSectionCollapsed && (
               <CenteredCommentInputContainer>
                 <CenteredCommentInput
                   value={newComment}
@@ -1802,6 +1868,12 @@ function App() {
                   </CommentButtons>
                 </CommentInputFooter>
               </CenteredCommentInputContainer>
+            )}
+
+            {isCommentSectionCollapsed && (
+              <ExpandTrigger onClick={() => setIsCommentSectionCollapsed(false)}>
+                ︽
+              </ExpandTrigger>
             )}
           </CommentCard>
         </ModalOverlay>
