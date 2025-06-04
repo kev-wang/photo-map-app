@@ -729,6 +729,14 @@ const ExpandTrigger = styled.div`
   user-select: none;
 `;
 
+const NoCommentsPlaceholder = styled.div`
+  text-align: center;
+  color: #888;
+  font-style: italic;
+  padding: 20px;
+  font-size: 14px;
+`;
+
 function App() {
   const [markers, setMarkers] = useState<PhotoMarker[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>([1.3521, 103.8198]); // Default to Singapore
@@ -1824,18 +1832,24 @@ function App() {
             )}
             
             <CommentSection isCollapsed={isCommentSectionCollapsed}>
-              {comments.map(comment => (
-                <CommentItem key={comment.id}>
-                  <CommentHeader>
-                    <CommentUserInfo>
-                      <CreatedByLabel>{comment.user_initials}</CreatedByLabel>
-                      <span>•</span>
-                      <CommentTimestamp>{formatTimeAgo(new Date(comment.created_at).getTime())}</CommentTimestamp>
-                    </CommentUserInfo>
-                  </CommentHeader>
-                  <CommentContent>{comment.content}</CommentContent>
-                </CommentItem>
-              ))}
+              {comments.length === 0 && !isCommentSectionCollapsed && !showCommentInput ? (
+                <NoCommentsPlaceholder>
+                  Looks like no one's commented yet. Click the speech bubble to leave the first comment!
+                </NoCommentsPlaceholder>
+              ) : (
+                comments.map(comment => (
+                  <CommentItem key={comment.id}>
+                    <CommentHeader>
+                      <CommentUserInfo>
+                        <CreatedByLabel>{comment.user_initials}</CreatedByLabel>
+                        <span>•</span>
+                        <CommentTimestamp>{formatTimeAgo(new Date(comment.created_at).getTime())}</CommentTimestamp>
+                      </CommentUserInfo>
+                    </CommentHeader>
+                    <CommentContent>{comment.content}</CommentContent>
+                  </CommentItem>
+                ))
+              )}
             </CommentSection>
 
             {showCommentInput && !isCommentSectionCollapsed && (
