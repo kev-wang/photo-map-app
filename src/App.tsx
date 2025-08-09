@@ -1786,9 +1786,19 @@ function App() {
             <HeaderBanner>Rules</HeaderBanner>
             <RulesText>
               <ul>
-                <li>Every photo posted have 7 days of life ⏳ by default, when life runs out photo will fade from the map</li>
-                <li>Every "like" 👍 will extend photo's life by 7 days, every "dislike" 👎 will reduce photo's life by 7 days</li>
-                <li>You must "like" a photo in order to "dislike" another photo</li>
+                <li>Photos live inside Zones (small hex areas on the map at H3 resolution 7).</li>
+                <li>When a Zone has ≤ 7 photos: all photos in that Zone have infinite life (∞). Likes/dislikes still accumulate and display.</li>
+                <li>When a Zone reaches 8+ photos: a 7‑day competition begins for all photos in that Zone:
+                  <ul>
+                    <li>All like/dislike counters reset to 0 for those photos.</li>
+                    <li>All photos receive the same baseline life: 7 days from that moment.</li>
+                    <li>Each like adds +7 days; each dislike subtracts −7 days.</li>
+                  </ul>
+                </li>
+                <li>When a photo’s life reaches zero, it is permanently removed.</li>
+                <li>If the Zone drops back to ≤ 7 photos: remaining photos become infinite again and keep their current like/dislike counts (no reset on this transition).</li>
+                <li>If the Zone later returns to 8+ photos: counters reset again and a fresh 7‑day competition starts for all photos in that Zone.</li>
+                <li>You must “like” a photo before you can “dislike” another photo.</li>
               </ul>
             </RulesText>
             <CloseButton onClick={() => setShowRules(false)}>Close</CloseButton>
