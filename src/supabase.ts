@@ -40,6 +40,8 @@ export interface PhotoMarker {
   thumbnail_url?: string;
   views?: number;
   created_at?: string;
+  expires_at?: string | null;
+  h3_res7?: string | null;
 }
 
 export interface Comment {
@@ -58,8 +60,8 @@ export const database = {
     console.log('Executing getMarkers query...');
     const { data, error } = await supabase
       .from('photo_markers')
-      .select('id,position,created_by,timestamp,likes,dislikes,last_interaction,thumbnail_url,views,created_at')
-      .order('timestamp', { ascending: false })
+      .select('id,position,created_by,timestamp,likes,dislikes,last_interaction,thumbnail_url,views,created_at,expires_at,h3_res7')
+      .order('created_at', { ascending: false })
       .limit(100); // Limit to 100 markers to prevent overloading
 
     if (error) {

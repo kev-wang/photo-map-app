@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import type { MapContainerProps, TileLayerProps } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { latLngToCell } from 'h3-js';
 import { database, PhotoMarker as BasePhotoMarker, testSupabaseConnection, supabase, Comment } from './supabase';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { TermsAndConditions } from './TermsAndConditions';
@@ -29,7 +30,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const LIFETIME_HOURS = 168;
+// Note: countdown is computed from expires_at now
 
 const AppContainer = styled.div`
   height: 100vh;
@@ -341,7 +342,7 @@ const AsText = styled.span`
 `;
 
 // Add thumbnail_url and views to PhotoMarker type for correct typing
-type PhotoMarker = BasePhotoMarker & { thumbnail_url?: string; views?: number };
+type PhotoMarker = BasePhotoMarker & { thumbnail_url?: string; views?: number; expires_at?: string | null; h3_res7?: string | null };
 
 // Helper to generate a thumbnail from an image blob
 async function generateThumbnail(blob: Blob, maxSize = 64): Promise<Blob> {
@@ -1020,6 +1021,7 @@ function App() {
       });
 
       const newPosition: [number, number] = [position.coords.latitude, position.coords.longitude];
+      const h3Index = latLngToCell(newPosition[0], newPosition[1], 7);
       const newMarker = {
         position: newPosition,
         photo_url: photoUrl,
@@ -1028,7 +1030,9 @@ function App() {
         likes: 0,
         dislikes: 0,
         created_by: userInitials || 'Anonymous',
-        last_interaction: Date.now()
+        last_interaction: Date.now(),
+        h3_res7: h3Index,
+        expires_at: null
       };
 
       const savedMarker = await database.addMarker(newMarker);
@@ -1075,19 +1079,17 @@ function App() {
         ...prev,
         [markerId]: 'like'
       }));
-      showNotification('Photo liked! Time extended by 168 hours');
+      // If finite, we will extend life by 7 days; if infinite, just record the like
+      const isInfinite = !marker.expires_at;
+      showNotification(isInfinite ? 'Like recorded' : 'Photo liked! Time extended by 168 hours');
 
-      // Update database in background - FIXED: ADD 168 hours to extend life
-      const newTimestamp = marker.timestamp + (168 * 60 * 60 * 1000);
-      console.log('Updating marker timestamp:', {
-        oldTimestamp: new Date(marker.timestamp).toLocaleString(),
-        newTimestamp: new Date(newTimestamp).toLocaleString(),
-        difference: '168 hours added'
-      });
-      
+      const newExpiresAt = isInfinite
+        ? null
+        : new Date((new Date(marker.expires_at!).getTime()) + (168 * 60 * 60 * 1000)).toISOString();
+
       await database.updateMarker(markerId, {
         likes: marker.likes + 1,
-        timestamp: newTimestamp,
+        expires_at: newExpiresAt,
         last_interaction: Date.now()
       });
     } catch (error) {
@@ -1127,19 +1129,16 @@ function App() {
         ...prev,
         [markerId]: 'dislike'
       }));
-      showNotification('Photo disliked. Time reduced by 168 hours');
+      const isInfinite = !marker.expires_at;
+      showNotification(isInfinite ? 'Dislike recorded' : 'Photo disliked. Time reduced by 168 hours');
 
-      // Update database in background - FIXED: SUBTRACT 168 hours to reduce life
-      const newTimestamp = marker.timestamp - (168 * 60 * 60 * 1000);
-      console.log('Updating marker timestamp:', {
-        oldTimestamp: new Date(marker.timestamp).toLocaleString(),
-        newTimestamp: new Date(newTimestamp).toLocaleString(),
-        difference: '168 hours subtracted'
-      });
-      
+      const newExpiresAt = isInfinite
+        ? null
+        : new Date((new Date(marker.expires_at!).getTime()) - (168 * 60 * 60 * 1000)).toISOString();
+
       await database.updateMarker(markerId, {
         dislikes: marker.dislikes + 1,
-        timestamp: newTimestamp,
+        expires_at: newExpiresAt,
         last_interaction: Date.now()
       });
     } catch (error) {
@@ -1150,24 +1149,19 @@ function App() {
   };
 
   // Function to check if a marker is expired
-  const isMarkerExpired = (timestamp: number): boolean => {
-    const now = Date.now();
-    const age = (now - timestamp) / (1000 * 60 * 60);
-    return age >= LIFETIME_HOURS;
+  const isMarkerExpired = (marker: PhotoMarker): boolean => {
+    if (!marker.expires_at) return false;
+    return Date.now() > new Date(marker.expires_at).getTime();
   };
 
-  const calculateTimeRemaining = (timestamp: number): string => {
+  const calculateTimeRemaining = (marker: PhotoMarker): string => {
+    if (!marker.expires_at) return '∞';
     const now = Date.now();
-    const age = (now - timestamp) / (1000 * 60 * 60);
-    const remaining = LIFETIME_HOURS - age;
-    
-    const days = Math.floor(remaining / 24);
-    const hours = Math.floor(remaining % 24);
-    
-    if (days > 0) {
-      return `${days}d ${hours}h`;
-    }
-    return `${hours}h`;
+    const diffMs = new Date(marker.expires_at).getTime() - now;
+    const remainingHours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+    const days = Math.floor(remainingHours / 24);
+    const hours = remainingHours % 24;
+    return days > 0 ? `${days}d ${hours}h` : `${hours}h`;
   };
 
   const mapProps: MapContainerProps & { ref?: (map: L.Map) => void } = {
@@ -1277,8 +1271,9 @@ function App() {
         // Force marker icons to update when zoom changes
         markers.forEach(marker => {
           if (markerRefs.current[marker.id]) {
-            const now = Date.now();
-            const hoursRemaining = LIFETIME_HOURS - ((now - marker.timestamp) / (1000 * 60 * 60));
+            const hoursRemaining = marker.expires_at
+              ? (new Date(marker.expires_at).getTime() - Date.now()) / (1000 * 60 * 60)
+              : undefined;
             markerRefs.current[marker.id].setIcon(
               createCustomIcon(marker.created_by, marker.thumbnail_url || '', hoursRemaining)
             );
@@ -1405,13 +1400,13 @@ function App() {
     const markers = cluster.getAllChildMarkers();
     const count = markers.length;
     
-    // Find marker with longest life using attached data
+    // Find marker with longest life (∞ wins)
     const now = Date.now();
     const markerWithLongestLife = markers.reduce((longest: any, current: any) => {
-      const longestData = longest.options.photoMarker;
-      const currentData = current.options.photoMarker;
-      const longestLife = LIFETIME_HOURS - ((now - longestData.timestamp) / (1000 * 60 * 60));
-      const currentLife = LIFETIME_HOURS - ((now - currentData.timestamp) / (1000 * 60 * 60));
+      const longestData = longest.options.photoMarker as PhotoMarker;
+      const currentData = current.options.photoMarker as PhotoMarker;
+      const longestLife = longestData.expires_at ? (new Date(longestData.expires_at).getTime() - now) / (1000 * 60 * 60) : Infinity;
+      const currentLife = currentData.expires_at ? (new Date(currentData.expires_at).getTime() - now) / (1000 * 60 * 60) : Infinity;
       return currentLife > longestLife ? current : longest;
     }, markers[0]);
     const markerData = markerWithLongestLife.options.photoMarker;
@@ -1578,10 +1573,11 @@ function App() {
               zoomToBoundsOnClick={true}
             >
               {markers
-                .filter(marker => !isMarkerExpired(marker.timestamp))
+                .filter(marker => !isMarkerExpired(marker))
                 .map((marker) => {
-                  const now = Date.now();
-                  const hoursRemaining = LIFETIME_HOURS - ((now - marker.timestamp) / (1000 * 60 * 60));
+                  const hoursRemaining = marker.expires_at
+                    ? (new Date(marker.expires_at).getTime() - Date.now()) / (1000 * 60 * 60)
+                    : undefined;
                   return (
                     <Marker 
                       key={marker.id} 
@@ -1635,10 +1631,10 @@ function App() {
                           }}
                         >
                           <PhotoInfo style={{ position: 'static', borderRadius: '8px 8px 0 0', marginBottom: 0 }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <span role="img" aria-label="hourglass">⏳</span>
-                              <TimeRemaining>{calculateTimeRemaining(marker.timestamp)}</TimeRemaining>
-                            </span>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span role="img" aria-label="hourglass">⏳</span>
+                            <TimeRemaining>{calculateTimeRemaining(marker)}</TimeRemaining>
+                          </span>
                             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                 <span role="img" aria-label="views">👁️</span>

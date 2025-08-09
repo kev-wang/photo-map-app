@@ -16,32 +16,21 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 console.log("Hello from Functions!")
 
 Deno.serve(async (_req) => {
-  const BASE_LIFESPAN_MS = 7 * 24 * 60 * 60 * 1000;
-  const now = Date.now();
-
-  // 1. Fetch all markers
-  const { data: markers, error: fetchError } = await supabase
+  // 1. Fetch expired markers based on expires_at
+  const nowIso = new Date().toISOString();
+  const { data: expiredMarkers, error: fetchError } = await supabase
     .from('photo_markers')
-    .select('id,photo_url,thumbnail_url,timestamp,likes,dislikes');
+    .select('id,photo_url,thumbnail_url')
+    .not('expires_at', 'is', null)
+    .lt('expires_at', nowIso);
   if (fetchError) {
     return new Response(JSON.stringify({ error: fetchError.message }), { status: 500 })
   }
-  if (!markers) {
+  if (!expiredMarkers || expiredMarkers.length === 0) {
     return new Response(JSON.stringify({ deleted: 0 }), { status: 200 })
   }
 
-  // 2. Find expired marker IDs
-  const expiredMarkers = markers.filter((marker) => {
-    const lifespanMs = BASE_LIFESPAN_MS + (marker.likes * BASE_LIFESPAN_MS) - (marker.dislikes * BASE_LIFESPAN_MS);
-    const expiryTime = marker.timestamp + lifespanMs;
-    return now > expiryTime;
-  });
-
-  if (expiredMarkers.length === 0) {
-    return new Response(JSON.stringify({ deleted: 0 }), { status: 200 })
-  }
-
-  // 3. Delete files from Storage
+  // 2. Delete files from Storage
   for (const marker of expiredMarkers) {
     // Remove full image
     if (marker.photo_url && marker.photo_url.includes('/full/')) {
@@ -59,7 +48,7 @@ Deno.serve(async (_req) => {
     }
   }
 
-  // 4. Delete all expired markers from DB
+  // 3. Delete all expired markers from DB
   const expiredIds = expiredMarkers.map((marker) => marker.id);
   const { error: deleteError } = await supabase
     .from('photo_markers')
